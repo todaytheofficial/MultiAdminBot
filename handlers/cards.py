@@ -11,9 +11,6 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 import asyncio
 from typing import Dict, Set
-import g4f
-
-g4f.debug.version_check = False
 
 from config import (
     EMOJI, CARDS, RARITY_CHANCES, RARITY_NAMES, RARITY_COLORS,
