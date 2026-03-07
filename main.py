@@ -292,7 +292,6 @@ async def start_help_command(message: Message):
         "├ /tickets — мои билеты\n"
         "├ /spin — прокрутка\n"
         "├ /multispin — мультиспин\n"
-        "├ /aispin — AI прокрутка (2 🎫)\n"
         "├ /fusionspin — fusion спин (5 🎫 + 3 💎)\n"
         "└ /pity — счётчики гарантий\n\n"
 
@@ -380,7 +379,6 @@ async def set_commands():
         BotCommand(command="tickets", description="🎟️ Мои билеты"),
         BotCommand(command="spin", description="🎰 Прокрутить карту"),
         BotCommand(command="multispin", description="🎰 Мультиспин"),
-        BotCommand(command="aispin", description="🤖 AI прокрутка"),
         BotCommand(command="casino", description="🎰 Казино-рулетка"),
         BotCommand(command="fusionspin", description="🔮 Fusion спин"),
         BotCommand(command="pity", description="🎯 Счётчики гарантий"),
