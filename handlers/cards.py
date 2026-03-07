@@ -2,6 +2,7 @@
 import random
 import os
 import logging
+import math
 from datetime import datetime, timedelta
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, FSInputFile, ChatMemberOwner
@@ -194,7 +195,7 @@ def get_total_luck_boost(db, uid: int) -> float:
     if user:
         luck_boost = user.get("luck_boost", 1.0)
         luck_until = user.get("luck_boost_until")
-        
+
         if luck_boost > 1.0 and luck_until:
             try:
                 until_dt = datetime.fromisoformat(luck_until) if isinstance(luck_until, str) else luck_until
@@ -204,9 +205,24 @@ def get_total_luck_boost(db, uid: int) -> float:
                     db.remove_luck_boost(uid)
             except:
                 pass
-    
+
     admin_boost = DatabaseManager.get_global_db().get_spin_boost(uid)
     return max(shop_boost, admin_boost)
+
+
+def get_casino_win_chance(boost: float) -> float:
+    """
+    Шанс выигрыша в казино с учётом удачи:
+    - x1 (нет удачи): 50%
+    - x2: 60%
+    - x3: ~65%
+    - x5: ~73% (≈75%)
+    - Максимум: 95%
+    """
+    if boost <= 1.0:
+        return 0.50
+    chance = 0.50 + 0.10 * math.log2(boost)
+    return min(0.95, chance)
 
 
 def get_random_card(boost=1.0, uid=None, cid=None):
@@ -590,6 +606,8 @@ async def cmd_balance(msg: Message):
     txt += f"🛡️ Щитов: <b>{db.get_shields(uid)}</b>\n"
     if boost > 1:
         txt += f"\n🍀 <b>Удача: x{boost}</b>\n"
+        casino_chance = get_casino_win_chance(boost)
+        txt += f"🎰 Шанс в казино: <b>{int(casino_chance * 100)}%</b>\n"
     txt += f"\n🔮 Fusions: <b>{user.get('total_fusions', 0)}</b>\n"
     txt += f"💎 Всего Mults: <b>{user.get('total_mults_earned', 0)}</b>\n\n"
     txt += "<i>💱 /exchange | 🔮 /fusionspin | 💎 /mults</i>"
@@ -765,7 +783,12 @@ async def cmd_boostspin(msg: Message, bot: Bot):
     mult, hours = max(1.0, min(10.0, mult)), max(1, min(720, hours))
     DatabaseManager.get_global_db().set_spin_boost(tid, mult, hours)
 
-    await msg.reply(f"🍀 <b>Удача выдана!</b>\n👤 {name}\n📈 x{mult} на {hours}ч", parse_mode="HTML")
+    casino_chance = get_casino_win_chance(mult)
+    await msg.reply(
+        f"🍀 <b>Удача выдана!</b>\n👤 {name}\n📈 x{mult} на {hours}ч\n"
+        f"🎰 Шанс в казино: <b>{int(casino_chance * 100)}%</b>",
+        parse_mode="HTML"
+    )
 
 
 @router.message(Command("resetcd"))
@@ -789,7 +812,7 @@ async def cmd_resetcd(msg: Message, bot: Bot):
 
 
 # ══════════════════════════════════════════════════════════════
-#  КАЗИНО-РУЛЕТКА С УДАЧЕЙ
+#  КАЗИНО-РУЛЕТКА С УДАЧЕЙ (ИСПРАВЛЕННОЕ)
 # ══════════════════════════════════════════════════════════════
 
 ROULETTE_BETS = {
@@ -849,12 +872,21 @@ async def cmd_casino(msg: Message):
     user = db.get_user(uid)
     coins = user.get("coins", 0)
     boost = get_total_luck_boost(db, uid)
+    win_chance = get_casino_win_chance(boost)
 
-    luck_txt = f"\n🍀 <b>Удача: x{boost}</b> — шанс выше!" if boost > 1 else ""
+    if boost > 1:
+        luck_txt = (
+            f"\n🍀 <b>Удача: x{boost}</b>"
+            f"\n📊 Шанс выигрыша: <b>{int(win_chance * 100)}%</b>"
+        )
+    else:
+        luck_txt = f"\n📊 Шанс выигрыша: <b>50%</b>"
 
     await msg.reply(
         f"🎰 <b>КАЗИНО</b>\n\n"
         f"💰 Баланс: <b>{coins}</b> 🪙{luck_txt}\n\n"
+        f"<i>🍀 Удача повышает шанс!</i>\n"
+        f"<i>x2 → 60% | x3 → 65% | x5 → 75%</i>\n\n"
         f"Выбери ставку:",
         parse_mode="HTML",
         reply_markup=casino_main_kb()
@@ -878,7 +910,15 @@ async def casino_cb(cb: CallbackQuery):
         user = db.get_user(uid)
         coins = user.get("coins", 0) if user else 0
         boost = get_total_luck_boost(db, uid)
-        luck_txt = f"\n🍀 <b>Удача: x{boost}</b>" if boost > 1 else ""
+        win_chance = get_casino_win_chance(boost)
+
+        if boost > 1:
+            luck_txt = (
+                f"\n🍀 <b>Удача: x{boost}</b>"
+                f"\n📊 Шанс выигрыша: <b>{int(win_chance * 100)}%</b>"
+            )
+        else:
+            luck_txt = f"\n📊 Шанс выигрыша: <b>50%</b>"
 
         try:
             await cb.message.edit_text(
@@ -896,9 +936,14 @@ async def casino_cb(cb: CallbackQuery):
         user = db.get_user(uid)
         coins = user.get("coins", 0) if user else 0
         boost = get_total_luck_boost(db, uid)
+        win_chance = get_casino_win_chance(boost)
 
         bet = ROULETTE_BETS[action]
-        luck_txt = f"\n🍀 Удача: x{boost}" if boost > 1 else ""
+
+        if boost > 1:
+            luck_txt = f"\n🍀 Удача x{boost} → шанс {int(win_chance * 100)}%"
+        else:
+            luck_txt = ""
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -932,7 +977,6 @@ async def casino_cb(cb: CallbackQuery):
 
 @router.callback_query(F.data.startswith("casbet:"))
 async def casino_play(cb: CallbackQuery):
-    # Антиспам
     uid = cb.from_user.id
     ok, rem = antispam.check(uid, "casino")
     if not ok:
@@ -963,51 +1007,59 @@ async def casino_play(cb: CallbackQuery):
     if bet_amount < 10:
         return await cb.answer("❌ Минимум 10!", show_alert=True)
 
+    # Снимаем ставку
     db.remove_coins(uid, bet_amount)
 
     bet = ROULETTE_BETS[bet_type]
     boost = get_total_luck_boost(db, uid)
 
-    base_win_chance = len(bet["nums"]) / 37
-    boosted_chance = min(0.95, base_win_chance * (1 + (boost - 1) * 0.5))
+    # ========== НОВАЯ ФОРМУЛА ШАНСОВ ==========
+    # 50% без удачи | 60% x2 | 65% x3 | 75% x5 | макс 95%
+    win_chance = get_casino_win_chance(boost)
 
-    if random.random() < boosted_chance:
+    # Определяем выиграл или нет
+    is_win = random.random() < win_chance
+
+    if is_win:
+        # Выбираем выигрышное число из ставки
         result = random.choice(bet["nums"])
-        is_win = True
     else:
+        # Выбираем проигрышное число
         losing_nums = [n for n in range(37) if n not in bet["nums"]]
         result = random.choice(losing_nums) if losing_nums else random.randint(0, 36)
-        is_win = False
 
     result_color = get_num_color(result)
 
     if is_win:
         winnings = bet_amount * bet["mult"]
-        if boost > 1:
-            bonus = int(bet_amount * (boost - 1) * 0.1)
-            winnings += bonus
-            bonus_txt = f" (+{bonus} бонус)"
-        else:
-            bonus_txt = ""
-
         db.add_coins(uid, winnings)
         profit = winnings - bet_amount
         quest(db, uid, "earn_coins", winnings)
 
-        header = "🟢🎉 <b>ЗЕРО!!!</b> 🎉🟢" if result == 0 else "✅ <b>ВЫИГРЫШ!</b>"
-        luck_info = f"\n🍀 Удача x{boost} — шанс был {int(boosted_chance*100)}%!" if boost > 1 else ""
+        chance_pct = int(win_chance * 100)
+
+        if result == 0 and bet_type == "green":
+            header = "🟢🎉 <b>ЗЕРО!!! ДЖЕКПОТ!</b> 🎉🟢"
+        elif bet["mult"] >= 3:
+            header = "🎉🎉 <b>КРУПНЫЙ ВЫИГРЫШ!</b> 🎉🎉"
+        else:
+            header = "✅ <b>ВЫИГРЫШ!</b>"
+
+        luck_info = f"\n🍀 Удача x{boost} → шанс был {chance_pct}%" if boost > 1 else ""
 
         txt = (
             f"{header}\n\n"
             f"🎱 Выпало: {result_color} <b>{result}</b>\n"
             f"🎯 Ставка: {bet['name']}\n"
-            f"💵 Ставка: {bet_amount} 🪙\n"
-            f"💰 Выигрыш: <b>{winnings}</b> 🪙{bonus_txt}\n"
+            f"💵 Поставил: {bet_amount} 🪙\n"
+            f"💰 Получил: <b>{winnings}</b> 🪙\n"
             f"📈 Профит: <b>+{profit}</b> 🪙{luck_info}\n\n"
             f"💵 Баланс: <b>{db.get_coins(uid)}</b> 🪙"
         )
     else:
-        luck_info = f"\n🍀 Удача x{boost} не помогла..." if boost > 1 else ""
+        chance_pct = int(win_chance * 100)
+        luck_info = f"\n🍀 Удача x{boost} (шанс был {chance_pct}%)" if boost > 1 else ""
+
         txt = (
             f"❌ <b>МИМО!</b>\n\n"
             f"🎱 Выпало: {result_color} <b>{result}</b>\n"
@@ -1019,16 +1071,26 @@ async def casino_play(cb: CallbackQuery):
     new_bal = db.get_coins(uid)
     buttons = []
     if new_bal >= bet_amount:
-        buttons.append([InlineKeyboardButton(text=f"🔄 Повтор ({bet_amount})", callback_data=f"casbet:{bet_type}:{bet_amount}")])
-    buttons.append([InlineKeyboardButton(text="🎰 Новая ставка", callback_data="cas:menu")])
+        buttons.append([InlineKeyboardButton(
+            text=f"🔄 Повтор ({bet_amount} 🪙)",
+            callback_data=f"casbet:{bet_type}:{bet_amount}"
+        )])
+    if new_bal >= 10:
+        buttons.append([InlineKeyboardButton(text="🎰 Новая ставка", callback_data="cas:menu")])
     buttons.append([InlineKeyboardButton(text="❌ Выйти", callback_data="cas:close")])
 
     try:
-        await cb.message.edit_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+        await cb.message.edit_text(
+            txt, parse_mode="HTML",
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+        )
     except TelegramRetryAfter as e:
         await asyncio.sleep(e.retry_after)
         try:
-            await cb.message.edit_text(txt, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+            await cb.message.edit_text(
+                txt, parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons)
+            )
         except:
             pass
     except TelegramBadRequest:
@@ -1172,16 +1234,11 @@ async def cmd_fusionspin(msg: Message):
 
 
 # ══════════════════════════════════════════════════════════════
-#  MULTI FUSION SPIN (дебафнутый, дорогой, сложный)
+#  MULTI FUSION SPIN
 # ══════════════════════════════════════════════════════════════
 
 @router.message(Command("multifusion", "mfspin", "mf"))
 async def cmd_multi_fusion(msg: Message):
-    """
-    Мульти-фьюжн спин — дорогой и с низкими шансами!
-    Стоимость: 10 билетов + 5 Mults за КАЖДЫЙ спин
-    Шансы СИЛЬНО занижены (debuff)
-    """
     if not is_group(msg):
         return await msg.reply(f"{EMOJI['cross']} Только в группах!")
 
@@ -1195,15 +1252,13 @@ async def cmd_multi_fusion(msg: Message):
         db.create_user(uid, msg.from_user.username, msg.from_user.first_name)
     DatabaseManager.get_global_db().update_user(uid, msg.from_user.username, msg.from_user.first_name)
 
-    # Парсим количество спинов
     args = msg.text.split()
-    count = 3  # По умолчанию 3
+    count = 3
     if len(args) > 1 and args[1].isdigit():
-        count = max(2, min(500, int(args[1])))  # От 2 до 20
+        count = max(2, min(500, int(args[1])))
 
-    # ДОРОГАЯ СТОИМОСТЬ
-    TICKET_COST_PER_SPIN = 10  # 10 билетов за спин (вместо 5)
-    MULTS_COST_PER_SPIN = 5    # 5 Mults за спин (вместо 3)
+    TICKET_COST_PER_SPIN = 10
+    MULTS_COST_PER_SPIN = 5
 
     total_tickets = TICKET_COST_PER_SPIN * count
     total_mults = MULTS_COST_PER_SPIN * count
@@ -1211,28 +1266,20 @@ async def cmd_multi_fusion(msg: Message):
     tickets = db.get_spin_tickets(uid)
     mults = db.get_mults(uid)
 
-    # Буст удачи (но он будет ДЕБАФНУТ)
     base_boost = get_total_luck_boost(db, uid)
-    
-    # ДЕБАФФ: удача работает только на 30%
     debuff_multiplier = 0.3
     effective_boost = 1.0 + (base_boost - 1.0) * debuff_multiplier
 
-    # СИЛЬНО ЗАНИЖЕННЫЕ ШАНСЫ
-    base_mega = 1.0      # Было 3%, стало 1%
-    base_fused = 40.0    # Было 70%, стало 40%
-    # 59% — ничего!
+    base_mega = 1.0
+    base_fused = 40.0
 
-    mega_chance = min(15, base_mega * effective_boost)      # Максимум 15%
-    fused_chance = min(60, base_fused * effective_boost)    # Максимум 60%
+    mega_chance = min(15, base_mega * effective_boost)
+    fused_chance = min(60, base_fused * effective_boost)
     nothing_chance = 100 - mega_chance - fused_chance
 
-    # Показываем инфо
     if tickets < total_tickets or mults < total_mults:
         max_possible = min(tickets // TICKET_COST_PER_SPIN, mults // MULTS_COST_PER_SPIN)
-        
-        debuff_warning = ""
-        
+
         return await msg.reply(
             f"🔮💀 <b>MULTI FUSION</b> (Хардкор!)\n\n"
             f"❌ <b>Недостаточно ресурсов!</b>\n\n"
@@ -1240,19 +1287,16 @@ async def cmd_multi_fusion(msg: Message):
             f"├ 🎫 {total_tickets} билетов (у тебя: {tickets})\n"
             f"└ 💎 {total_mults} Mults (у тебя: {mults})\n\n"
             f"💰 Стоимость за спин: {TICKET_COST_PER_SPIN}🎫 + {MULTS_COST_PER_SPIN}💎\n\n"
-            f"{debuff_warning}\n\n"
             f"{'✅ Можешь сделать: <b>' + str(max_possible) + '</b> спинов' if max_possible > 0 else '❌ Накопи ресурсы!'}\n\n"
             f"<code>/mf [кол-во]</code> — от 2 до 500",
             parse_mode="HTML"
         )
 
-    # Снимаем ресурсы
     for _ in range(total_tickets):
         if not db.use_spin_ticket(uid):
             return await msg.reply(f"{EMOJI['cross']} Ошибка с билетами!")
 
     if not db.remove_mults(uid, total_mults):
-        # Возвращаем билеты
         db.add_spin_tickets(uid, total_tickets)
         return await msg.reply(f"{EMOJI['cross']} Ошибка с Mults!")
 
@@ -1264,12 +1308,7 @@ async def cmd_multi_fusion(msg: Message):
     regular = [c for c in FUSION_CARDS if c.get("rarity") == "fused"]
     mega = [c for c in FUSION_CARDS if c.get("rarity") == "mega_fused"]
 
-    # Крутим!
-    results = {
-        "mega": [],
-        "fused": [],
-        "nothing": 0
-    }
+    results = {"mega": [], "fused": [], "nothing": 0}
     total_coins = 0
     best_card = None
     user_cards = db.get_user(uid).get("cards", [])
@@ -1288,12 +1327,10 @@ async def cmd_multi_fusion(msg: Message):
             new_cards.append(card)
         else:
             results["nothing"] += 1
-            # Маленькое утешение за пустой спин
             consolation = random.randint(10, 30)
             total_coins += consolation
             continue
 
-        # Добавляем карту
         is_dupe = any(c["name"] == card["name"] for c in user_cards + new_cards[:-1])
         db.add_card(uid, {
             "name": card["name"],
@@ -1304,14 +1341,12 @@ async def cmd_multi_fusion(msg: Message):
             "obtained_at": datetime.now().isoformat()
         })
 
-        # Монеты
-        base_coins = (card["attack"] + card["defense"]) // 3  # Меньше монет
+        base_coins = (card["attack"] + card["defense"]) // 3
         coin_reward = base_coins
         if is_dupe:
             coin_reward += coin_reward // 2
         total_coins += coin_reward
 
-        # Лучшая карта
         if not best_card or (card["attack"] + card["defense"]) > (best_card["attack"] + best_card["defense"]):
             best_card = card
 
@@ -1319,12 +1354,10 @@ async def cmd_multi_fusion(msg: Message):
     quest(db, uid, "spin", count)
     quest(db, uid, "earn_coins", total_coins)
 
-    # Формируем результат
     mega_count = len(results["mega"])
     fused_count = len(results["fused"])
     nothing_count = results["nothing"]
 
-    # Определяем заголовок
     if mega_count > 0:
         header = "🌌💀 <b>MULTI FUSION — MEGA!!!</b> 💀🌌"
     elif fused_count > 0:
@@ -1336,7 +1369,6 @@ async def cmd_multi_fusion(msg: Message):
     txt += f"🎰 Спинов: <b>{count}</b>\n"
     txt += f"💸 Потрачено: <b>{total_tickets}</b>🎫 + <b>{total_mults}</b>💎\n\n"
 
-    # Статистика
     txt += f"<b>📊 Результаты:</b>\n"
     if mega_count > 0:
         txt += f"🌌 MEGA Fused: <b>{mega_count}</b>\n"
@@ -1345,7 +1377,6 @@ async def cmd_multi_fusion(msg: Message):
     if nothing_count > 0:
         txt += f"💨 Пусто: <b>{nothing_count}</b>\n"
 
-    # Список карт
     all_won_cards = results["mega"] + results["fused"]
     if all_won_cards:
         txt += f"\n<b>🃏 Карты:</b>\n"
@@ -1356,11 +1387,9 @@ async def cmd_multi_fusion(msg: Message):
             txt += f"<i>...ещё {len(all_won_cards)-10}</i>\n"
 
     txt += f"\n🪙 <b>+{total_coins}</b>"
-
     txt += f"\n\n🎟️ Осталось: <b>{db.get_spin_tickets(uid)}</b>"
     txt += f"\n💎 Mults: <b>{db.get_mults(uid)}</b>"
 
-    # Показываем лучшую карту если есть
     if best_card:
         await send_card(msg, best_card, txt)
     else:
@@ -1390,7 +1419,9 @@ async def cmd_stats(msg: Message):
 
     txt = f"📊 <b>СТАТИСТИКА</b>\n\n🃏 Карт: <b>{len(cards)}</b>\n"
     if boost > 1:
+        casino_chance = get_casino_win_chance(boost)
         txt += f"🍀 <b>Удача: x{boost}</b>\n"
+        txt += f"🎰 Шанс в казино: <b>{int(casino_chance * 100)}%</b>\n"
     txt += "\n"
 
     for r in ["mega", "mega_fused", "limited", "fused", "special", "mythic", "legendary", "epic", "rare", "common"]:
@@ -1418,17 +1449,17 @@ async def cmd_fusion_help(msg: Message):
         f"├ 🌌 MEGA: ~3%\n"
         f"├ 🔮 Fused: ~70%\n"
         f"└ 💨 Ничего: ~27%\n\n"
-        
+
         f"<b>2️⃣ /multifusion (/mf)</b> 💀\n"
         f"├ Стоимость: <b>10🎫 + 5💎</b> за спин!\n"
         f"├ 🌌 MEGA: ~1% (сложно!)\n"
         f"├ 🔮 Fused: ~40%\n"
         f"├ 💨 Ничего: ~59%\n"
-        
+
         f"<b>Использование:</b>\n"
         f"<code>/mf 5</code> — 5 спинов\n"
         f"<code>/mf 10</code> — 10 спинов\n\n"
-        
+
         f"💡 Multi Fusion — для хардкорщиков!\n"
         f"Риск выше, но можно получить много карт за раз."
     )
