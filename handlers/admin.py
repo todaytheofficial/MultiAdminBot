@@ -1581,18 +1581,21 @@ async def give_card_command(message: Message, bot: Bot):
     card_name = remaining_args.strip()
     
     try:
-        from config import CARDS, FUSION_CARDS
+        from config import CARDS, FUSION_CARDS, LIMITED_CARDS  # <-- ДОБАВЛЕНО LIMITED_CARDS
     except ImportError:
         return await message.reply(f"{EMOJI['cross']} Не удалось загрузить список карт!")
     
     found_card = None
-    all_cards = CARDS + FUSION_CARDS
+    # ИСПРАВЛЕНИЕ: добавляем LIMITED_CARDS в поиск
+    all_cards = CARDS + FUSION_CARDS + LIMITED_CARDS
     
+    # Точное совпадение (без учёта регистра)
     for card in all_cards:
         if card["name"].lower() == card_name.lower():
             found_card = card.copy()
             break
     
+    # Частичное совпадение
     if not found_card:
         for card in all_cards:
             if card_name.lower() in card["name"].lower():
@@ -1600,7 +1603,13 @@ async def give_card_command(message: Message, bot: Bot):
                 break
     
     if not found_card:
-        return await message.reply(f"{EMOJI['cross']} Карта «{card_name}» не найдена!")
+        # Показываем список limited карт для удобства
+        limited_names = [c["name"] for c in LIMITED_CARDS]
+        return await message.reply(
+            f"{EMOJI['cross']} Карта «{card_name}» не найдена!\n\n"
+            f"<b>Limited карты:</b>\n" + "\n".join(f"• {name}" for name in limited_names),
+            parse_mode="HTML"
+        )
     
     db = get_db(message)
     if not db.get_user(target_id):
@@ -1622,7 +1631,6 @@ async def give_card_command(message: Message, bot: Bot):
         f"👮 {message.from_user.mention_html()}",
         parse_mode="HTML"
     )
-
 
 @router.message(Command("resetcd", "resetcooldown"))
 async def reset_cooldown_command(message: Message, bot: Bot):
