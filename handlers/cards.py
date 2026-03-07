@@ -175,6 +175,49 @@ def check_limited(c):
         return False
 
 
+# ═══════════════════════════════════════════════════════════════
+#  НОВАЯ ФУНКЦИЯ: Получить общий буст удачи (из магазина + админ)
+# ═══════════════════════════════════════════════════════════════
+
+def get_total_luck_boost(db, uid: int) -> float:
+    """
+    Получить общий множитель удачи из ДВУХ источников:
+    1. luck_boost из групповой БД (покупка в магазине Mults)
+    2. spin_boost из глобальной БД (админская команда /boostspin)
+    
+    Возвращает максимальный из двух (или их произведение - на выбор)
+    """
+    # 1. Буст из магазина Mults (групповая БД)
+    shop_boost = 1.0
+    user = db.get_user(uid)
+    if user:
+        luck_boost = user.get("luck_boost", 1.0)
+        luck_until = user.get("luck_boost_until")
+        
+        if luck_boost > 1.0 and luck_until:
+            try:
+                until_dt = datetime.fromisoformat(luck_until) if isinstance(luck_until, str) else luck_until
+                if until_dt > datetime.now():
+                    shop_boost = luck_boost
+                else:
+                    # Буст истёк - сбрасываем
+                    db.remove_luck_boost(uid)
+            except:
+                pass
+    
+    # 2. Буст от админа (глобальная БД)
+    admin_boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    
+    # Берём МАКСИМАЛЬНЫЙ из двух (или можно перемножить)
+    # Вариант 1: Максимум
+    total_boost = max(shop_boost, admin_boost)
+    
+    # Вариант 2: Перемножение (раскомментируй если хочешь)
+    # total_boost = shop_boost * admin_boost
+    
+    return total_boost
+
+
 def get_random_card(boost=1.0, uid=None, cid=None):
     db = DatabaseManager.get_db(cid) if cid else None
 
@@ -304,7 +347,9 @@ async def cmd_spin(msg: Message):
     if not db.use_spin_ticket(uid):
         return await msg.reply(f"{EMOJI['cross']} Ошибка!")
 
-    boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, uid)
+    
     card = get_random_card(boost, uid, cid)
     user = db.get_user(uid)
     is_dupe = any(c["name"] == card["name"] for c in user.get("cards", []))
@@ -356,7 +401,9 @@ async def cmd_multispin(msg: Message):
         return await msg.reply(f"🎟️ <b>Минимум 2 билета!</b>\nУ тебя: {tickets}", parse_mode="HTML")
 
     count = min(count, tickets)
-    boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, uid)
 
     used, cards, total_coins, best = 0, [], 0, None
     user_cards = db.get_user(uid).get("cards", [])
@@ -549,7 +596,9 @@ async def cmd_balance(msg: Message):
         db.create_user(uid, msg.from_user.username, msg.from_user.first_name)
 
     user = db.get_user(uid)
-    boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, uid)
 
     txt = f"💰 <b>Баланс</b>\n\n"
     txt += f"🪙 Монеты: <b>{user.get('coins', 0)}</b>\n"
@@ -818,7 +867,9 @@ async def cmd_casino(msg: Message):
 
     user = db.get_user(uid)
     coins = user.get("coins", 0)
-    boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, uid)
 
     luck_txt = f"\n🍀 <b>Удача: x{boost}</b> — шанс выше!" if boost > 1 else ""
 
@@ -847,7 +898,9 @@ async def casino_cb(cb: CallbackQuery):
         uid = cb.from_user.id
         user = db.get_user(uid)
         coins = user.get("coins", 0) if user else 0
-        boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+        
+        # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+        boost = get_total_luck_boost(db, uid)
         luck_txt = f"\n🍀 <b>Удача: x{boost}</b>" if boost > 1 else ""
 
         try:
@@ -865,7 +918,9 @@ async def casino_cb(cb: CallbackQuery):
         uid = cb.from_user.id
         user = db.get_user(uid)
         coins = user.get("coins", 0) if user else 0
-        boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+        
+        # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+        boost = get_total_luck_boost(db, uid)
 
         bet = ROULETTE_BETS[action]
         luck_txt = f"\n🍀 Удача: x{boost}" if boost > 1 else ""
@@ -931,7 +986,9 @@ async def casino_play(cb: CallbackQuery):
     db.remove_coins(uid, bet_amount)
 
     bet = ROULETTE_BETS[bet_type]
-    boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, uid)
 
     # ═══════════════════════════════════════════════
     #  УДАЧА ВЛИЯЕТ НА ШАНС ВЫИГРЫША!
@@ -1038,7 +1095,8 @@ async def cmd_fusionspin(msg: Message):
     TICKET_COST = 5
     MULTS_COST = 3
 
-    boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, uid)
 
     # ═══════════════════════════════════════════════
     #  ШАНСЫ С УДАЧЕЙ
@@ -1181,7 +1239,8 @@ async def cmd_stats(msg: Message):
     for c in cards:
         rarities[c["rarity"]] = rarities.get(c["rarity"], 0) + 1
 
-    boost = DatabaseManager.get_global_db().get_spin_boost(msg.from_user.id)
+    # ═══ ИСПОЛЬЗУЕМ НОВУЮ ФУНКЦИЮ ═══
+    boost = get_total_luck_boost(db, msg.from_user.id)
     pity = db.get_pity_counters(msg.from_user.id)
 
     txt = f"📊 <b>СТАТИСТИКА</b>\n\n🃏 Карт: <b>{len(cards)}</b>\n"
