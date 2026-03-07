@@ -380,7 +380,7 @@ async def cmd_multispin(msg: Message):
     DatabaseManager.get_global_db().update_user(uid, msg.from_user.username, msg.from_user.first_name)
 
     args = msg.text.split()
-    count = max(2, min(200, int(args[1]))) if len(args) > 1 and args[1].isdigit() else 5
+    count = max(2, min(500, int(args[1]))) if len(args) > 1 and args[1].isdigit() else 5
     tickets = db.get_spin_tickets(uid)
 
     if tickets < 2:
@@ -1199,7 +1199,7 @@ async def cmd_multi_fusion(msg: Message):
     args = msg.text.split()
     count = 3  # По умолчанию 3
     if len(args) > 1 and args[1].isdigit():
-        count = max(2, min(20, int(args[1])))  # От 2 до 20
+        count = max(2, min(500, int(args[1])))  # От 2 до 20
 
     # ДОРОГАЯ СТОИМОСТЬ
     TICKET_COST_PER_SPIN = 10  # 10 билетов за спин (вместо 5)
@@ -1232,8 +1232,6 @@ async def cmd_multi_fusion(msg: Message):
         max_possible = min(tickets // TICKET_COST_PER_SPIN, mults // MULTS_COST_PER_SPIN)
         
         debuff_warning = ""
-        if base_boost > 1:
-            debuff_warning = f"\n\n⚠️ <b>ДЕБАФФ!</b> Удача x{base_boost} → x{effective_boost:.2f}"
         
         return await msg.reply(
             f"🔮💀 <b>MULTI FUSION</b> (Хардкор!)\n\n"
@@ -1242,13 +1240,9 @@ async def cmd_multi_fusion(msg: Message):
             f"├ 🎫 {total_tickets} билетов (у тебя: {tickets})\n"
             f"└ 💎 {total_mults} Mults (у тебя: {mults})\n\n"
             f"💰 Стоимость за спин: {TICKET_COST_PER_SPIN}🎫 + {MULTS_COST_PER_SPIN}💎\n\n"
-            f"<b>⚠️ ЗАНИЖЕННЫЕ ШАНСЫ:</b>\n"
-            f"├ 🌌 MEGA — <b>{mega_chance:.1f}%</b>\n"
-            f"├ 🔮 Fused — <b>{fused_chance:.1f}%</b>\n"
-            f"└ 💨 Ничего — <b>{nothing_chance:.1f}%</b>"
             f"{debuff_warning}\n\n"
             f"{'✅ Можешь сделать: <b>' + str(max_possible) + '</b> спинов' if max_possible > 0 else '❌ Накопи ресурсы!'}\n\n"
-            f"<code>/mf [кол-во]</code> — от 2 до 20",
+            f"<code>/mf [кол-во]</code> — от 2 до 500",
             parse_mode="HTML"
         )
 
@@ -1362,10 +1356,6 @@ async def cmd_multi_fusion(msg: Message):
             txt += f"<i>...ещё {len(all_won_cards)-10}</i>\n"
 
     txt += f"\n🪙 <b>+{total_coins}</b>"
-
-    # Дебафф инфо
-    if base_boost > 1:
-        txt += f"\n\n⚠️ <i>Удача x{base_boost} была дебафнута до x{effective_boost:.2f}</i>"
 
     txt += f"\n\n🎟️ Осталось: <b>{db.get_spin_tickets(uid)}</b>"
     txt += f"\n💎 Mults: <b>{db.get_mults(uid)}</b>"

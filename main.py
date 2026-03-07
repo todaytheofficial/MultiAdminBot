@@ -13,7 +13,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, EMOJI
-from handlers import admin, cards, battle, market, trade, daily, promo, quests, mults, rp, pay
+from handlers import admin, cards, battle, market, trade, daily, promo, quests, mults, rp, pay, stock
 from database import DatabaseManager
 
 logging.basicConfig(level=logging.INFO)
@@ -68,6 +68,7 @@ dp.include_router(quests.router)
 dp.include_router(mults.router)
 dp.include_router(rp.router)
 dp.include_router(pay.router)
+dp.include_router(stock.router)
 
 dp.update.middleware(MessageStatsMiddleware())
 
