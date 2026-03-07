@@ -83,6 +83,11 @@ class GroupDatabase:
             user.setdefault("last_mythic_spin", 0)
             user.setdefault("total_mults_earned", 0)
             user.setdefault("total_fusions", 0)
+            # Новые поля для Mults системы
+            user.setdefault("luck_boost", 1.0)
+            user.setdefault("luck_boost_until", None)
+            user.setdefault("fusion_tokens", 0)
+            user.setdefault("tickets", 0)
         return user
 
     def create_user(self, user_id: int, username: str = None, first_name: str = None):
@@ -108,6 +113,10 @@ class GroupDatabase:
                         "last_mythic_spin": 0,
                         "total_mults_earned": 0,
                         "total_fusions": 0,
+                        "luck_boost": 1.0,
+                        "luck_boost_until": None,
+                        "fusion_tokens": 0,
+                        "tickets": 0,
                         "created_at": datetime.now().isoformat()
                     },
                     "$set": {
@@ -187,6 +196,52 @@ class GroupDatabase:
         return [{k: v for k, v in doc.items() if k != "_id"} for doc in cursor]
 
     # ────────────────────────────────────────────────
+    #                LUCK BOOST
+    # ────────────────────────────────────────────────
+
+    def set_luck_boost(self, user_id: int, multiplier: float, until: str):
+        """Установить буст удачи"""
+        self._col("users").update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "luck_boost": multiplier,
+                "luck_boost_until": until
+            }}
+        )
+
+    def get_luck_boost(self, user_id: int) -> tuple:
+        """Получить буст удачи (multiplier, until)"""
+        user = self.get_user(user_id)
+        if not user:
+            return 1.0, None
+        
+        multiplier = user.get("luck_boost", 1.0)
+        until = user.get("luck_boost_until")
+        
+        # Проверяем не истёк ли
+        if until:
+            try:
+                until_dt = datetime.fromisoformat(until) if isinstance(until, str) else until
+                if until_dt <= datetime.now():
+                    # Истёк - сбрасываем
+                    self._col("users").update_one(
+                        {"user_id": user_id},
+                        {"$set": {"luck_boost": 1.0}, "$unset": {"luck_boost_until": ""}}
+                    )
+                    return 1.0, None
+            except:
+                pass
+        
+        return multiplier, until
+
+    def remove_luck_boost(self, user_id: int):
+        """Удалить буст удачи"""
+        self._col("users").update_one(
+            {"user_id": user_id},
+            {"$set": {"luck_boost": 1.0}, "$unset": {"luck_boost_until": ""}}
+        )
+
+    # ────────────────────────────────────────────────
     #                FUSION
     # ────────────────────────────────────────────────
 
@@ -212,6 +267,30 @@ class GroupDatabase:
     def get_total_fusions(self, user_id: int) -> int:
         user = self.get_user(user_id)
         return user.get("total_fusions", 0) if user else 0
+
+    def add_fusion_tokens(self, user_id: int, amount: int):
+        """Добавить токены Fusion"""
+        if amount <= 0:
+            return
+        self._col("users").update_one(
+            {"user_id": user_id},
+            {"$inc": {"fusion_tokens": amount}}
+        )
+
+    def remove_fusion_tokens(self, user_id: int, amount: int) -> bool:
+        """Удалить токены Fusion"""
+        if amount <= 0:
+            return True
+        result = self._col("users").update_one(
+            {"user_id": user_id, "fusion_tokens": {"$gte": amount}},
+            {"$inc": {"fusion_tokens": -amount}}
+        )
+        return result.modified_count > 0
+
+    def get_fusion_tokens(self, user_id: int) -> int:
+        """Получить количество токенов Fusion"""
+        user = self.get_user(user_id)
+        return user.get("fusion_tokens", 0) if user else 0
 
     # ────────────────────────────────────────────────
     #                DAILY
@@ -337,6 +416,7 @@ class GroupDatabase:
         )
 
     def add_tickets(self, user_id: int, amount: int = 1):
+        """Алиас для add_spin_tickets"""
         self.add_spin_tickets(user_id, amount)
 
     def use_spin_ticket(self, user_id: int) -> bool:
@@ -1196,8 +1276,11 @@ class GroupDatabase:
                 "last_legendary_spin": 0,
                 "last_mythic_spin": 0,
                 "total_mults_earned": 0,
-                "total_fusions": 0
-            }, "$unset": {"last_daily": "", "last_free_ticket": ""}}
+                "total_fusions": 0,
+                "luck_boost": 1.0,
+                "fusion_tokens": 0,
+                "tickets": 0
+            }, "$unset": {"last_daily": "", "last_free_ticket": "", "luck_boost_until": ""}}
         )
 
 
