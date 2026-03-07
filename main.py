@@ -4,12 +4,12 @@ import logging
 import json
 import os
 import aiohttp
+from aiohttp import web
 from datetime import datetime
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.types import Message, BotCommand, ChatPermissions, Update
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
-from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
 from config import BOT_TOKEN, EMOJI
@@ -19,12 +19,24 @@ from database import DatabaseManager
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-)
+bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
+
+
+# ═══════════════════════════════════════════════
+#  ВЕБ-СЕРВЕР ДЛЯ RENDER
+# ═══════════════════════════════════════════════
+
+web_app = web.Application()
+
+
+async def health_check(request):
+    return web.Response(text="OK")
+
+
+web_app.router.add_get("/", health_check)
+web_app.router.add_get("/health", health_check)
 
 
 # ================= MIDDLEWARE ДЛЯ СТАТИСТИКИ СООБЩЕНИЙ =================
@@ -55,7 +67,7 @@ dp.include_router(promo.router)
 dp.include_router(quests.router)
 dp.include_router(mults.router)
 dp.include_router(rp.router)
-dp.include_router(pay.router)  # <-- НОВЫЙ РОУТЕР
+dp.include_router(pay.router)
 
 dp.update.middleware(MessageStatsMiddleware())
 
@@ -79,52 +91,24 @@ async def collect_stats() -> dict:
     try:
         for group_db in DatabaseManager.get_all_group_dbs():
             groups += 1
-            conn = group_db.get_connection()
-            cursor = conn.cursor()
-
             try:
-                cursor.execute("SELECT COUNT(DISTINCT user_id) FROM users")
-                r = cursor.fetchone()
-                total_users += r[0] if r and r[0] else 0
-            except:
-                pass
-
-            try:
-                cursor.execute("SELECT cards FROM users WHERE cards IS NOT NULL AND cards != '[]'")
-                for row in cursor.fetchall():
-                    try:
-                        cl = json.loads(row[0] or '[]')
-                        total_cards += len(cl)
-                        for card in cl:
-                            rar = card.get('rarity', 'common')
-                            cards_by_rarity[rar] = cards_by_rarity.get(rar, 0) + 1
-                    except:
-                        pass
-            except:
-                pass
-
-            try:
-                cursor.execute("SELECT COUNT(*) FROM battles")
-                r = cursor.fetchone()
-                total_battles += r[0] if r and r[0] else 0
-            except:
-                pass
-
-            try:
-                cursor.execute("SELECT COALESCE(SUM(COALESCE(total_mults_earned, 0)), 0) FROM users")
-                r = cursor.fetchone()
-                total_mults_global += r[0] if r and r[0] else 0
-            except:
-                pass
-
-            try:
-                cursor.execute("SELECT COALESCE(SUM(COALESCE(total_fusions, 0)), 0) FROM users")
-                r = cursor.fetchone()
-                total_fusions_global += r[0] if r and r[0] else 0
-            except:
-                pass
-
-            conn.close()
+                # Для MongoDB
+                users = list(group_db._col("users").find())
+                total_users += len(users)
+                
+                for user in users:
+                    cards_list = user.get("cards", [])
+                    total_cards += len(cards_list)
+                    for card in cards_list:
+                        rar = card.get("rarity", "common")
+                        cards_by_rarity[rar] = cards_by_rarity.get(rar, 0) + 1
+                    
+                    total_mults_global += user.get("total_mults_earned", 0)
+                    total_fusions_global += user.get("total_fusions", 0)
+                
+                total_battles += group_db._col("battles").count_documents({})
+            except Exception as e:
+                logger.debug(f"Stats collect error for group: {e}")
     except Exception as e:
         logger.error(f"Ошибка сбора статистики: {e}")
 
@@ -410,7 +394,13 @@ async def set_commands():
     logger.info("✅ Команды установлены")
 
 
-async def main():
+# ═══════════════════════════════════════════════
+#  ЗАПУСК БОТА (для Render)
+# ═══════════════════════════════════════════════
+
+async def start_bot():
+    """Запуск бота в фоне"""
+    await asyncio.sleep(2)
     logger.info("🚀 Бот запускается...")
     await set_commands()
 
@@ -419,11 +409,19 @@ async def main():
     asyncio.create_task(stats_collector_loop())
 
     logger.info("✅ Бот готов к работе!")
+    await bot.delete_webhook(drop_pending_updates=True)
     await dp.start_polling(bot)
 
 
+async def on_startup(app):
+    """При старте веб-сервера запускаем бота"""
+    asyncio.create_task(start_bot())
+
+
+web_app.on_startup.append(on_startup)
+
+
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("🛑 Бот остановлен")
+    port = int(os.getenv("PORT", 10000))
+    logger.info(f"🌐 Web server starting on port {port}...")
+    web.run_app(web_app, host="0.0.0.0", port=port)
