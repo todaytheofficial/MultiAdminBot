@@ -1627,4 +1627,296 @@ async def give_card_command(message: Message, bot: Bot):
 @router.message(Command("resetcd", "resetcooldown"))
 async def reset_cooldown_command(message: Message, bot: Bot):
     if not await is_owner_or_creator(message, bot):
-        return await message.reply(f"{EMOJI['
+        return await message.reply(f"{EMOJI['cross']} Только владелец группы или создатель бота!")
+    
+    target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
+    
+    if error:
+        return await message.reply("<code>/resetcd @user</code>", parse_mode="HTML")
+    
+    db = get_db(message)
+    if not db.get_user(target_id):
+        return await message.reply(f"{EMOJI['cross']} Пользователь не найден!")
+    
+    db.reset_ticket_cooldown(target_id)
+    
+    await message.reply(
+        f"⏱️ <b>Кулдаун сброшен!</b>\n\n"
+        f"👤 {mention_user(target_id, first_name, username)}\n\n"
+        f"👮 {message.from_user.mention_html()}",
+        parse_mode="HTML"
+    )
+
+
+# ═══════════════════════════════════════════════════════════
+#                     БУСТ УДАЧИ
+# ═══════════════════════════════════════════════════════════
+
+@router.message(Command("boostspin"))
+async def boost_spin_command(message: Message, bot: Bot):
+    """Выдать глобальный буст удачи (админский)"""
+    if not await is_owner_or_creator(message, bot):
+        return await message.reply(f"{EMOJI['cross']} Только владелец группы или создатель бота!")
+    
+    target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
+    
+    if error:
+        return await message.reply(
+            f"✨ <b>Буст удачи (глобальный)</b>\n\n"
+            f"<code>/boostspin @user [множитель] [часы]</code>\n"
+            f"<code>/boostspin 2.5 48</code> (реплай)\n\n"
+            f"Этот буст работает во всех группах!",
+            parse_mode="HTML"
+        )
+    
+    multiplier = 2.0
+    duration = 24
+    
+    if remaining_args:
+        parts = remaining_args.split()
+        if len(parts) >= 1:
+            try:
+                multiplier = float(parts[0])
+            except:
+                pass
+        if len(parts) >= 2:
+            try:
+                duration = int(parts[1])
+            except:
+                pass
+    
+    multiplier = max(1.0, min(10.0, multiplier))
+    duration = max(1, min(720, duration))
+    
+    global_db = DatabaseManager.get_global_db()
+    global_db.set_spin_boost(target_id, multiplier, duration)
+    
+    await message.reply(
+        f"✨ <b>ГЛОБАЛЬНЫЙ БУСТ УДАЧИ!</b>\n\n"
+        f"👤 {mention_user(target_id, first_name, username)}\n"
+        f"📈 Множитель: <b>x{multiplier}</b>\n"
+        f"⏱️ Длительность: <b>{duration}</b> ч.\n\n"
+        f"<i>Работает во всех группах!</i>\n\n"
+        f"👮 {message.from_user.mention_html()}",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("giveluck"))
+async def give_luck_command(message: Message, bot: Bot):
+    """Выдать локальный буст удачи (как в магазине Mults)"""
+    if not await is_owner_or_creator(message, bot):
+        return await message.reply(f"{EMOJI['cross']} Только владелец группы или создатель бота!")
+    
+    if not is_group_chat(message):
+        return await message.reply(f"{EMOJI['cross']} Только в группах!")
+    
+    target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
+    
+    if error:
+        return await message.reply(
+            f"🍀 <b>Буст удачи (локальный)</b>\n\n"
+            f"<code>/giveluck @user [множитель] [часы]</code>\n"
+            f"<code>/giveluck 1.5 6</code> (реплай)\n\n"
+            f"Работает только в этой группе!",
+            parse_mode="HTML"
+        )
+    
+    multiplier = 1.5
+    duration = 6
+    
+    if remaining_args:
+        parts = remaining_args.split()
+        if len(parts) >= 1:
+            try:
+                multiplier = float(parts[0])
+            except:
+                pass
+        if len(parts) >= 2:
+            try:
+                duration = int(parts[1])
+            except:
+                pass
+    
+    multiplier = max(1.0, min(5.0, multiplier))
+    duration = max(1, min(168, duration))
+    
+    db = get_db(message)
+    if not db.get_user(target_id):
+        db.create_user(target_id, username, first_name)
+    
+    until = datetime.now() + timedelta(hours=duration)
+    db.set_luck_boost(target_id, multiplier, until.isoformat())
+    
+    await message.reply(
+        f"🍀 <b>ЛОКАЛЬНЫЙ БУСТ УДАЧИ!</b>\n\n"
+        f"👤 {mention_user(target_id, first_name, username)}\n"
+        f"📈 Множитель: <b>x{multiplier}</b>\n"
+        f"⏱️ Длительность: <b>{duration}</b> ч.\n\n"
+        f"<i>Работает только в этой группе!</i>\n\n"
+        f"👮 {message.from_user.mention_html()}",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("removespinboost"))
+async def remove_spin_boost_command(message: Message, bot: Bot):
+    if not await is_owner_or_creator(message, bot):
+        return await message.reply(f"{EMOJI['cross']} Только владелец группы или создатель бота!")
+    
+    target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
+    
+    if error:
+        return await message.reply("<code>/removespinboost @user</code>", parse_mode="HTML")
+    
+    global_db = DatabaseManager.get_global_db()
+    global_db.remove_spin_boost(target_id)
+    
+    if is_group_chat(message):
+        db = get_db(message)
+        db.remove_luck_boost(target_id)
+    
+    await message.reply(
+        f"{EMOJI['check']} Все бусты удачи удалены для {mention_user(target_id, first_name, username)}!",
+        parse_mode="HTML"
+    )
+
+
+@router.message(Command("checkboost", "checkluck"))
+async def check_boost_command(message: Message, bot: Bot):
+    """Проверить все бусты удачи пользователя"""
+    target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
+    
+    if error:
+        target_id = message.from_user.id
+        first_name = message.from_user.first_name
+        username = message.from_user.username
+    
+    text = f"🍀 <b>Бусты удачи</b>\n\n👤 {mention_user(target_id, first_name, username)}\n\n"
+    
+    has_boost = False
+    
+    global_db = DatabaseManager.get_global_db()
+    global_boost = global_db.get_spin_boost(target_id)
+    
+    if global_boost and global_boost > 1.0:
+        text += f"🌐 <b>Глобальный:</b> x{global_boost}\n"
+        has_boost = True
+    
+    if is_group_chat(message):
+        db = get_db(message)
+        user = db.get_user(target_id)
+        
+        if user:
+            luck_boost = user.get("luck_boost", 1.0)
+            luck_until = user.get("luck_boost_until")
+            
+            if luck_boost > 1.0 and luck_until:
+                try:
+                    until_dt = datetime.fromisoformat(luck_until) if isinstance(luck_until, str) else luck_until
+                    if until_dt > datetime.now():
+                        remaining = until_dt - datetime.now()
+                        hours = int(remaining.total_seconds() // 3600)
+                        minutes = int((remaining.total_seconds() % 3600) // 60)
+                        text += f"📍 <b>Локальный:</b> x{luck_boost} ({hours}ч {minutes}м)\n"
+                        has_boost = True
+                    else:
+                        db.remove_luck_boost(target_id)
+                except:
+                    pass
+    
+    if has_boost:
+        shop_boost = 1.0
+        if is_group_chat(message):
+            db = get_db(message)
+            user = db.get_user(target_id)
+            if user:
+                luck_boost = user.get("luck_boost", 1.0)
+                luck_until = user.get("luck_boost_until")
+                if luck_boost > 1.0 and luck_until:
+                    try:
+                        until_dt = datetime.fromisoformat(luck_until) if isinstance(luck_until, str) else luck_until
+                        if until_dt > datetime.now():
+                            shop_boost = luck_boost
+                    except:
+                        pass
+        
+        admin_boost = global_db.get_spin_boost(target_id) or 1.0
+        total_boost = max(shop_boost, admin_boost)
+        
+        text += f"\n✨ <b>Итого:</b> x{total_boost}"
+    else:
+        text += "❌ Нет активных бустов"
+    
+    await message.reply(text, parse_mode="HTML")
+
+
+# ═══════════════════════════════════════════════════════════
+#                     ИНФОРМАЦИЯ
+# ═══════════════════════════════════════════════════════════
+
+@router.message(Command("chatinfo"))
+async def chat_info_command(message: Message, bot: Bot):
+    if not is_group_chat(message):
+        return await message.reply(f"{EMOJI['cross']} Только в группах!")
+    
+    try:
+        chat = await bot.get_chat(message.chat.id)
+        members_count = await bot.get_chat_member_count(message.chat.id)
+        admins = await bot.get_chat_administrators(message.chat.id)
+        
+        text = (
+            f"ℹ️ <b>ИНФОРМАЦИЯ О ЧАТЕ</b>\n\n"
+            f"📛 <b>Название:</b> {chat.title}\n"
+            f"🆔 <b>ID:</b> <code>{chat.id}</code>\n"
+            f"👥 <b>Участников:</b> {members_count}\n"
+            f"👮 <b>Админов:</b> {len(admins)}"
+        )
+        
+        await message.reply(text, parse_mode="HTML")
+    except Exception as e:
+        await message.reply(f"{EMOJI['cross']} Ошибка: {e}")
+
+
+@router.message(Command("userinfo"))
+async def user_info_command(message: Message, bot: Bot):
+    target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
+    
+    if error:
+        target_id = message.from_user.id
+        first_name = message.from_user.first_name
+        username = message.from_user.username
+    
+    db = get_db(message) if is_group_chat(message) else None
+    user = db.get_user(target_id) if db else None
+    perms = await get_user_permissions(message, bot, target_id) if is_group_chat(message) else {"rank_emoji": "👤", "rank_name": "Пользователь"}
+    
+    text = (
+        f"👤 <b>ИНФОРМАЦИЯ О ПОЛЬЗОВАТЕЛЕ</b>\n\n"
+        f"📛 <b>Имя:</b> {first_name}\n"
+        f"🆔 <b>ID:</b> <code>{target_id}</code>\n"
+    )
+    
+    if username:
+        text += f"📧 <b>Username:</b> @{username}\n"
+    
+    text += f"\n{perms['rank_emoji']} <b>Ранг:</b> {perms['rank_name']}\n"
+    
+    if user:
+        text += f"\n<b>📊 Статистика:</b>\n"
+        text += f"🃏 Карт: {len(user.get('cards', []))}\n"
+        text += f"🪙 Монет: {user.get('coins', 0)}\n"
+        text += f"💎 Mults: {user.get('mults', 0)}\n"
+        text += f"🎟️ Билетов: {user.get('spin_tickets', 0)}\n"
+        text += f"🛡️ Щитов: {user.get('shields', 0)}\n"
+        text += f"⭐ Рейтинг: {user.get('rating', 0)}\n"
+        text += f"✅ Побед: {user.get('wins', 0)}\n"
+        text += f"❌ Поражений: {user.get('losses', 0)}\n"
+        
+        luck_boost = user.get("luck_boost", 1.0)
+        if luck_boost > 1.0:
+            text += f"\n🍀 <b>Буст удачи:</b> x{luck_boost}\n"
+    else:
+        text += f"\n<i>Пользователь не зарегистрирован</i>"
+    
+    await message.reply(text, parse_mode="HTML")
