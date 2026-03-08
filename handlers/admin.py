@@ -1581,21 +1581,18 @@ async def give_card_command(message: Message, bot: Bot):
     card_name = remaining_args.strip()
     
     try:
-        from config import CARDS, FUSION_CARDS, LIMITED_CARDS  # <-- ДОБАВЛЕНО LIMITED_CARDS
+        from config import CARDS, FUSION_CARDS, LIMITED_CARDS
     except ImportError:
         return await message.reply(f"{EMOJI['cross']} Не удалось загрузить список карт!")
     
     found_card = None
-    # ИСПРАВЛЕНИЕ: добавляем LIMITED_CARDS в поиск
     all_cards = CARDS + FUSION_CARDS + LIMITED_CARDS
     
-    # Точное совпадение (без учёта регистра)
     for card in all_cards:
         if card["name"].lower() == card_name.lower():
             found_card = card.copy()
             break
     
-    # Частичное совпадение
     if not found_card:
         for card in all_cards:
             if card_name.lower() in card["name"].lower():
@@ -1603,7 +1600,6 @@ async def give_card_command(message: Message, bot: Bot):
                 break
     
     if not found_card:
-        # Показываем список limited карт для удобства
         limited_names = [c["name"] for c in LIMITED_CARDS]
         return await message.reply(
             f"{EMOJI['cross']} Карта «{card_name}» не найдена!\n\n"
@@ -1662,7 +1658,10 @@ async def reset_cooldown_command(message: Message, bot: Bot):
 
 @router.message(Command("boostspin"))
 async def boost_spin_command(message: Message, bot: Bot):
-    """Выдать глобальный буст удачи (админский)"""
+    """Выдать буст удачи привязанный к текущей группе"""
+    if not is_group_chat(message):
+        return await message.reply(f"{EMOJI['cross']} Только в группах!")
+
     if not await is_owner_or_creator(message, bot):
         return await message.reply(f"{EMOJI['cross']} Только владелец группы или создатель бота!")
     
@@ -1670,10 +1669,10 @@ async def boost_spin_command(message: Message, bot: Bot):
     
     if error:
         return await message.reply(
-            f"✨ <b>Буст удачи (глобальный)</b>\n\n"
+            f"✨ <b>Буст удачи</b>\n\n"
             f"<code>/boostspin @user [множитель] [часы]</code>\n"
             f"<code>/boostspin 2.5 48</code> (реплай)\n\n"
-            f"Этот буст работает во всех группах!",
+            f"📍 Буст работает только в этой группе!",
             parse_mode="HTML"
         )
     
@@ -1696,15 +1695,21 @@ async def boost_spin_command(message: Message, bot: Bot):
     multiplier = max(1.0, min(10.0, multiplier))
     duration = max(1, min(720, duration))
     
+    # Привязываем к chat_id!
+    chat_id = message.chat.id
     global_db = DatabaseManager.get_global_db()
-    global_db.set_spin_boost(target_id, multiplier, duration)
+    global_db.set_spin_boost(target_id, multiplier, duration, chat_id)
+    
+    from handlers.cards import get_casino_win_chance
+    casino_chance = get_casino_win_chance(multiplier, "x2")
     
     await message.reply(
-        f"✨ <b>ГЛОБАЛЬНЫЙ БУСТ УДАЧИ!</b>\n\n"
+        f"✨ <b>БУСТ УДАЧИ ВЫДАН!</b>\n\n"
         f"👤 {mention_user(target_id, first_name, username)}\n"
         f"📈 Множитель: <b>x{multiplier}</b>\n"
-        f"⏱️ Длительность: <b>{duration}</b> ч.\n\n"
-        f"<i>Работает во всех группах!</i>\n\n"
+        f"⏱️ Длительность: <b>{duration}</b> ч.\n"
+        f"🎰 Шанс казино (x2): <b>{int(casino_chance * 100)}%</b>\n\n"
+        f"📍 <i>Работает только в этой группе!</i>\n\n"
         f"👮 {message.from_user.mention_html()}",
         parse_mode="HTML"
     )
@@ -1778,14 +1783,16 @@ async def remove_spin_boost_command(message: Message, bot: Bot):
         return await message.reply("<code>/removespinboost @user</code>", parse_mode="HTML")
     
     global_db = DatabaseManager.get_global_db()
-    global_db.remove_spin_boost(target_id)
-    
+    # Удаляем буст для текущей группы
     if is_group_chat(message):
+        global_db.remove_spin_boost(target_id, message.chat.id)
         db = get_db(message)
         db.remove_luck_boost(target_id)
+    else:
+        global_db.remove_spin_boost(target_id)
     
     await message.reply(
-        f"{EMOJI['check']} Все бусты удачи удалены для {mention_user(target_id, first_name, username)}!",
+        f"{EMOJI['check']} Бусты удачи удалены для {mention_user(target_id, first_name, username)}!",
         parse_mode="HTML"
     )
 
@@ -1805,13 +1812,15 @@ async def check_boost_command(message: Message, bot: Bot):
     has_boost = False
     
     global_db = DatabaseManager.get_global_db()
-    global_boost = global_db.get_spin_boost(target_id)
-    
-    if global_boost and global_boost > 1.0:
-        text += f"🌐 <b>Глобальный:</b> x{global_boost}\n"
-        has_boost = True
-    
+
+    # Показать буст для текущей группы
     if is_group_chat(message):
+        chat_id = message.chat.id
+        admin_boost = global_db.get_spin_boost(target_id, chat_id)
+        if admin_boost and admin_boost > 1.0:
+            text += f"✨ <b>Админский (эта группа):</b> x{admin_boost}\n"
+            has_boost = True
+
         db = get_db(message)
         user = db.get_user(target_id)
         
@@ -1826,7 +1835,7 @@ async def check_boost_command(message: Message, bot: Bot):
                         remaining = until_dt - datetime.now()
                         hours = int(remaining.total_seconds() // 3600)
                         minutes = int((remaining.total_seconds() % 3600) // 60)
-                        text += f"📍 <b>Локальный:</b> x{luck_boost} ({hours}ч {minutes}м)\n"
+                        text += f"📍 <b>Локальный (магазин):</b> x{luck_boost} ({hours}ч {minutes}м)\n"
                         has_boost = True
                     else:
                         db.remove_luck_boost(target_id)
@@ -1834,27 +1843,21 @@ async def check_boost_command(message: Message, bot: Bot):
                     pass
     
     if has_boost:
-        shop_boost = 1.0
         if is_group_chat(message):
+            from handlers.cards import get_total_luck_boost, get_casino_win_chance
             db = get_db(message)
-            user = db.get_user(target_id)
-            if user:
-                luck_boost = user.get("luck_boost", 1.0)
-                luck_until = user.get("luck_boost_until")
-                if luck_boost > 1.0 and luck_until:
-                    try:
-                        until_dt = datetime.fromisoformat(luck_until) if isinstance(luck_until, str) else luck_until
-                        if until_dt > datetime.now():
-                            shop_boost = luck_boost
-                    except:
-                        pass
-        
-        admin_boost = global_db.get_spin_boost(target_id) or 1.0
-        total_boost = max(shop_boost, admin_boost)
-        
-        text += f"\n✨ <b>Итого:</b> x{total_boost}"
+            total_boost = get_total_luck_boost(db, target_id, message.chat.id)
+            casino_x2 = get_casino_win_chance(total_boost, "x2")
+            casino_x3 = get_casino_win_chance(total_boost, "x3")
+            casino_x35 = get_casino_win_chance(total_boost, "x35")
+            text += (
+                f"\n✨ <b>Итого:</b> x{total_boost}\n"
+                f"🎰 Шансы: 🔴⚫{int(casino_x2*100)}% | "
+                f"x3→{int(casino_x3*100)}% | "
+                f"🟢{casino_x35*100:.1f}%"
+            )
     else:
-        text += "❌ Нет активных бустов"
+        text += "❌ Нет активных бустов в этой группе"
     
     await message.reply(text, parse_mode="HTML")
 

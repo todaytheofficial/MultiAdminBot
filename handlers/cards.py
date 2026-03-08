@@ -188,8 +188,12 @@ def check_limited(c):
         return False
 
 
-def get_total_luck_boost(db, uid: int) -> float:
-    """Получить общий буст удачи из магазина и от админа"""
+def get_total_luck_boost(db, uid: int, chat_id: int = None) -> float:
+    """
+    Получить буст удачи для конкретной группы.
+    Локальный (из БД группы) vs глобальный (привязан к chat_id в global_db).
+    """
+    # Локальный буст (магазин Mults, /giveluck) — только в этой группе
     shop_boost = 1.0
     user = db.get_user(uid)
     if user:
@@ -206,23 +210,76 @@ def get_total_luck_boost(db, uid: int) -> float:
             except:
                 pass
 
-    admin_boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+    # Админский буст — привязан к chat_id (не глобальный!)
+    admin_boost = 1.0
+    if chat_id:
+        admin_boost = DatabaseManager.get_global_db().get_spin_boost(uid, chat_id)
+    else:
+        admin_boost = DatabaseManager.get_global_db().get_spin_boost(uid)
+
     return max(shop_boost, admin_boost)
 
 
-def get_casino_win_chance(boost: float) -> float:
+def get_casino_win_chance(boost: float, bet_type: str = "x2") -> float:
     """
-    Шанс выигрыша в казино с учётом удачи:
-    - x1 (нет удачи): 50%
-    - x2: 60%
-    - x3: ~65%
-    - x5: ~73% (≈75%)
-    - Максимум: 95%
+    Шанс выигрыша в казино с учётом удачи И типа ставки.
+
+    Базовые шансы (без удачи) — реальная рулетка:
+      red/black/odd/even/low/high (x2): 18/37 ≈ 48.6% → округляем до 50%
+      d1/d2/d3 (x3): 12/37 ≈ 32.4%
+      green/число (x35): 1/37 ≈ 2.7%
+
+    Формула удачи для x2 ставок:
+      x1: 50%, x2: 55%, x3: 60%, x5: 65%, макс 95%
+
+    Для x3 и x35 — пропорциональный буст от базового шанса.
     """
+    # Базовые шансы по типу ставки
+    BASE_CHANCES = {
+        "x2": 0.50,    # red, black, odd, even, low, high
+        "x3": 0.324,   # d1, d2, d3
+        "x35": 0.027,  # green (зеро)
+    }
+
+    base = BASE_CHANCES.get(bet_type, 0.50)
+
     if boost <= 1.0:
-        return 0.50
-    chance = 0.50 + 0.10 * math.log2(boost)
-    return min(0.95, chance)
+        return base
+
+    if bet_type == "x2":
+        # x1→50%, x2→55%, x3→60%, x5→65%
+        # Линейная формула: 50% + (boost-1) * 3.75%
+        # x2: 50+3.75=53.75 ≈ 55 (подгоним)
+        # Используем: 50% + 5% * log2(boost) * 0.67 ... нет, проще таблицей
+        # x1=50, x2=55, x3=60, x5=65
+        # Интерполяция: chance = 50 + 15 * (boost-1) / (5-1) = 50 + 3.75*(boost-1)
+        chance = 0.50 + 0.0375 * (boost - 1.0)
+        return min(0.95, chance)
+
+    elif bet_type == "x3":
+        # Базовый 32.4%, с удачей растёт пропорционально
+        # x2: ~37%, x3: ~42%, x5: ~47%
+        chance = base + 0.0375 * (boost - 1.0)
+        return min(0.80, chance)
+
+    elif bet_type == "x35":
+        # Базовый 2.7%, с удачей растёт но медленнее
+        # x2: ~4%, x3: ~5.5%, x5: ~7%
+        chance = base + 0.01 * (boost - 1.0)
+        return min(0.30, chance)
+
+    return min(0.95, base)
+
+
+def get_bet_multiplier_type(bet_type: str) -> str:
+    """Определить тип множителя ставки для расчёта шансов"""
+    if bet_type in ("red", "black", "odd", "even", "low", "high"):
+        return "x2"
+    elif bet_type in ("d1", "d2", "d3"):
+        return "x3"
+    elif bet_type == "green":
+        return "x35"
+    return "x2"
 
 
 def get_random_card(boost=1.0, uid=None, cid=None):
@@ -351,7 +408,7 @@ async def cmd_spin(msg: Message):
     if not db.use_spin_ticket(uid):
         return await msg.reply(f"{EMOJI['cross']} Ошибка!")
 
-    boost = get_total_luck_boost(db, uid)
+    boost = get_total_luck_boost(db, uid, cid)
     card = get_random_card(boost, uid, cid)
     user = db.get_user(uid)
     is_dupe = any(c["name"] == card["name"] for c in user.get("cards", []))
@@ -403,7 +460,7 @@ async def cmd_multispin(msg: Message):
         return await msg.reply(f"🎟️ <b>Минимум 2 билета!</b>\nУ тебя: {tickets}", parse_mode="HTML")
 
     count = min(count, tickets)
-    boost = get_total_luck_boost(db, uid)
+    boost = get_total_luck_boost(db, uid, cid)
 
     used, cards, total_coins, best = 0, [], 0, None
     user_cards = db.get_user(uid).get("cards", [])
@@ -596,7 +653,7 @@ async def cmd_balance(msg: Message):
         db.create_user(uid, msg.from_user.username, msg.from_user.first_name)
 
     user = db.get_user(uid)
-    boost = get_total_luck_boost(db, uid)
+    boost = get_total_luck_boost(db, uid, msg.chat.id)
 
     txt = f"💰 <b>Баланс</b>\n\n"
     txt += f"🪙 Монеты: <b>{user.get('coins', 0)}</b>\n"
@@ -606,8 +663,8 @@ async def cmd_balance(msg: Message):
     txt += f"🛡️ Щитов: <b>{db.get_shields(uid)}</b>\n"
     if boost > 1:
         txt += f"\n🍀 <b>Удача: x{boost}</b>\n"
-        casino_chance = get_casino_win_chance(boost)
-        txt += f"🎰 Шанс в казино: <b>{int(casino_chance * 100)}%</b>\n"
+        casino_chance = get_casino_win_chance(boost, "x2")
+        txt += f"🎰 Шанс казино (x2): <b>{int(casino_chance * 100)}%</b>\n"
     txt += f"\n🔮 Fusions: <b>{user.get('total_fusions', 0)}</b>\n"
     txt += f"💎 Всего Mults: <b>{user.get('total_mults_earned', 0)}</b>\n\n"
     txt += "<i>💱 /exchange | 🔮 /fusionspin | 💎 /mults</i>"
@@ -760,6 +817,7 @@ async def cmd_boostspin(msg: Message, bot: Bot):
 
     args = msg.text.split()
     tid, name, mult, hours = None, None, 2.0, 24
+    cid = msg.chat.id
 
     if msg.reply_to_message:
         t = msg.reply_to_message.from_user
@@ -781,12 +839,15 @@ async def cmd_boostspin(msg: Message, bot: Bot):
         return await msg.reply("🍀 <code>/boostspin @user [множитель] [часы]</code>", parse_mode="HTML")
 
     mult, hours = max(1.0, min(10.0, mult)), max(1, min(720, hours))
-    DatabaseManager.get_global_db().set_spin_boost(tid, mult, hours)
 
-    casino_chance = get_casino_win_chance(mult)
+    # Привязываем буст к chat_id!
+    DatabaseManager.get_global_db().set_spin_boost(tid, mult, hours, cid)
+
+    casino_chance = get_casino_win_chance(mult, "x2")
     await msg.reply(
         f"🍀 <b>Удача выдана!</b>\n👤 {name}\n📈 x{mult} на {hours}ч\n"
-        f"🎰 Шанс в казино: <b>{int(casino_chance * 100)}%</b>",
+        f"🎰 Шанс казино (x2): <b>{int(casino_chance * 100)}%</b>\n"
+        f"📍 <i>Только в этой группе!</i>",
         parse_mode="HTML"
     )
 
@@ -816,16 +877,16 @@ async def cmd_resetcd(msg: Message, bot: Bot):
 # ══════════════════════════════════════════════════════════════
 
 ROULETTE_BETS = {
-    "red": {"name": "🔴 Красное", "mult": 2, "nums": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
-    "black": {"name": "⚫ Чёрное", "mult": 2, "nums": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
-    "green": {"name": "🟢 Зеро", "mult": 35, "nums": [0]},
-    "odd": {"name": "🔷 Нечёт", "mult": 2, "nums": [1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35]},
-    "even": {"name": "🔶 Чёт", "mult": 2, "nums": [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36]},
-    "low": {"name": "⬇️ 1-18", "mult": 2, "nums": list(range(1,19))},
-    "high": {"name": "⬆️ 19-36", "mult": 2, "nums": list(range(19,37))},
-    "d1": {"name": "1️⃣ 1-12", "mult": 3, "nums": list(range(1,13))},
-    "d2": {"name": "2️⃣ 13-24", "mult": 3, "nums": list(range(13,25))},
-    "d3": {"name": "3️⃣ 25-36", "mult": 3, "nums": list(range(25,37))},
+    "red": {"name": "🔴 Красное", "mult": 2, "mult_type": "x2", "nums": [1,3,5,7,9,12,14,16,18,19,21,23,25,27,30,32,34,36]},
+    "black": {"name": "⚫ Чёрное", "mult": 2, "mult_type": "x2", "nums": [2,4,6,8,10,11,13,15,17,20,22,24,26,28,29,31,33,35]},
+    "green": {"name": "🟢 Зеро", "mult": 35, "mult_type": "x35", "nums": [0]},
+    "odd": {"name": "🔷 Нечёт", "mult": 2, "mult_type": "x2", "nums": [1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35]},
+    "even": {"name": "🔶 Чёт", "mult": 2, "mult_type": "x2", "nums": [2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32,34,36]},
+    "low": {"name": "⬇️ 1-18", "mult": 2, "mult_type": "x2", "nums": list(range(1,19))},
+    "high": {"name": "⬆️ 19-36", "mult": 2, "mult_type": "x2", "nums": list(range(19,37))},
+    "d1": {"name": "1️⃣ 1-12", "mult": 3, "mult_type": "x3", "nums": list(range(1,13))},
+    "d2": {"name": "2️⃣ 13-24", "mult": 3, "mult_type": "x3", "nums": list(range(13,25))},
+    "d3": {"name": "3️⃣ 25-36", "mult": 3, "mult_type": "x3", "nums": list(range(25,37))},
 }
 
 
@@ -871,22 +932,31 @@ async def cmd_casino(msg: Message):
 
     user = db.get_user(uid)
     coins = user.get("coins", 0)
-    boost = get_total_luck_boost(db, uid)
-    win_chance = get_casino_win_chance(boost)
+    boost = get_total_luck_boost(db, uid, msg.chat.id)
+    win_chance_x2 = get_casino_win_chance(boost, "x2")
+    win_chance_x3 = get_casino_win_chance(boost, "x3")
+    win_chance_x35 = get_casino_win_chance(boost, "x35")
 
     if boost > 1:
         luck_txt = (
             f"\n🍀 <b>Удача: x{boost}</b>"
-            f"\n📊 Шанс выигрыша: <b>{int(win_chance * 100)}%</b>"
+            f"\n📊 Шансы: 🔴⚫ <b>{int(win_chance_x2 * 100)}%</b> | "
+            f"1️⃣2️⃣3️⃣ <b>{int(win_chance_x3 * 100)}%</b> | "
+            f"🟢 <b>{win_chance_x35 * 100:.1f}%</b>"
         )
     else:
-        luck_txt = f"\n📊 Шанс выигрыша: <b>50%</b>"
+        luck_txt = (
+            f"\n📊 Шансы: 🔴⚫ <b>50%</b> | "
+            f"1️⃣2️⃣3️⃣ <b>32%</b> | "
+            f"🟢 <b>2.7%</b>"
+        )
 
     await msg.reply(
         f"🎰 <b>КАЗИНО</b>\n\n"
         f"💰 Баланс: <b>{coins}</b> 🪙{luck_txt}\n\n"
         f"<i>🍀 Удача повышает шанс!</i>\n"
-        f"<i>x2 → 60% | x3 → 65% | x5 → 75%</i>\n\n"
+        f"<i>Без удачи: 🔴⚫50% | x3→32% | 🟢→2.7%</i>\n"
+        f"<i>x2→55% | x3→60% | x5→65% (для x2 ставок)</i>\n\n"
         f"Выбери ставку:",
         parse_mode="HTML",
         reply_markup=casino_main_kb()
@@ -907,18 +977,19 @@ async def casino_cb(cb: CallbackQuery):
     if action == "menu":
         db = get_db(cb)
         uid = cb.from_user.id
+        cid = cb.message.chat.id
         user = db.get_user(uid)
         coins = user.get("coins", 0) if user else 0
-        boost = get_total_luck_boost(db, uid)
-        win_chance = get_casino_win_chance(boost)
+        boost = get_total_luck_boost(db, uid, cid)
+        win_chance_x2 = get_casino_win_chance(boost, "x2")
 
         if boost > 1:
             luck_txt = (
                 f"\n🍀 <b>Удача: x{boost}</b>"
-                f"\n📊 Шанс выигрыша: <b>{int(win_chance * 100)}%</b>"
+                f"\n📊 Шанс (x2): <b>{int(win_chance_x2 * 100)}%</b>"
             )
         else:
-            luck_txt = f"\n📊 Шанс выигрыша: <b>50%</b>"
+            luck_txt = f"\n📊 Шанс (x2): <b>50%</b>"
 
         try:
             await cb.message.edit_text(
@@ -933,17 +1004,20 @@ async def casino_cb(cb: CallbackQuery):
     if action in ROULETTE_BETS:
         db = get_db(cb)
         uid = cb.from_user.id
+        cid = cb.message.chat.id
         user = db.get_user(uid)
         coins = user.get("coins", 0) if user else 0
-        boost = get_total_luck_boost(db, uid)
-        win_chance = get_casino_win_chance(boost)
+        boost = get_total_luck_boost(db, uid, cid)
 
         bet = ROULETTE_BETS[action]
+        mult_type = bet["mult_type"]
+        win_chance = get_casino_win_chance(boost, mult_type)
 
         if boost > 1:
             luck_txt = f"\n🍀 Удача x{boost} → шанс {int(win_chance * 100)}%"
         else:
-            luck_txt = ""
+            base_pct = {"x2": "50", "x3": "32", "x35": "2.7"}
+            luck_txt = f"\n📊 Базовый шанс: {base_pct.get(mult_type, '50')}%"
 
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -991,6 +1065,7 @@ async def casino_play(cb: CallbackQuery):
         return await cb.answer("❌ Ошибка!", show_alert=True)
 
     db = get_db(cb)
+    cid = cb.message.chat.id
     user = db.get_user(uid)
 
     if not user:
@@ -1010,11 +1085,11 @@ async def casino_play(cb: CallbackQuery):
     db.remove_coins(uid, bet_amount)
 
     bet = ROULETTE_BETS[bet_type]
-    boost = get_total_luck_boost(db, uid)
+    boost = get_total_luck_boost(db, uid, cid)
+    mult_type = bet["mult_type"]
 
-    # ========== НОВАЯ ФОРМУЛА ШАНСОВ ==========
-    # 50% без удачи | 60% x2 | 65% x3 | 75% x5 | макс 95%
-    win_chance = get_casino_win_chance(boost)
+    # ========== ШАНСЫ ЗАВИСЯТ ОТ ТИПА СТАВКИ ==========
+    win_chance = get_casino_win_chance(boost, mult_type)
 
     # Определяем выиграл или нет
     is_win = random.random() < win_chance
@@ -1028,14 +1103,13 @@ async def casino_play(cb: CallbackQuery):
         result = random.choice(losing_nums) if losing_nums else random.randint(0, 36)
 
     result_color = get_num_color(result)
+    chance_pct = win_chance * 100
 
     if is_win:
         winnings = bet_amount * bet["mult"]
         db.add_coins(uid, winnings)
         profit = winnings - bet_amount
         quest(db, uid, "earn_coins", winnings)
-
-        chance_pct = int(win_chance * 100)
 
         if result == 0 and bet_type == "green":
             header = "🟢🎉 <b>ЗЕРО!!! ДЖЕКПОТ!</b> 🎉🟢"
@@ -1044,7 +1118,7 @@ async def casino_play(cb: CallbackQuery):
         else:
             header = "✅ <b>ВЫИГРЫШ!</b>"
 
-        luck_info = f"\n🍀 Удача x{boost} → шанс был {chance_pct}%" if boost > 1 else ""
+        luck_info = f"\n🍀 Удача x{boost} → шанс был {chance_pct:.1f}%" if boost > 1 else ""
 
         txt = (
             f"{header}\n\n"
@@ -1056,8 +1130,7 @@ async def casino_play(cb: CallbackQuery):
             f"💵 Баланс: <b>{db.get_coins(uid)}</b> 🪙"
         )
     else:
-        chance_pct = int(win_chance * 100)
-        luck_info = f"\n🍀 Удача x{boost} (шанс был {chance_pct}%)" if boost > 1 else ""
+        luck_info = f"\n🍀 Удача x{boost} (шанс был {chance_pct:.1f}%)" if boost > 1 else ""
 
         txt = (
             f"❌ <b>МИМО!</b>\n\n"
@@ -1124,7 +1197,7 @@ async def cmd_fusionspin(msg: Message):
     TICKET_COST = 5
     MULTS_COST = 3
 
-    boost = get_total_luck_boost(db, uid)
+    boost = get_total_luck_boost(db, uid, cid)
 
     base_mega = 3
     base_fused = 70
@@ -1265,7 +1338,7 @@ async def cmd_multi_fusion(msg: Message):
     tickets = db.get_spin_tickets(uid)
     mults = db.get_mults(uid)
 
-    base_boost = get_total_luck_boost(db, uid)
+    base_boost = get_total_luck_boost(db, uid, cid)
     debuff_multiplier = 0.3
     effective_boost = 1.0 + (base_boost - 1.0) * debuff_multiplier
 
@@ -1413,14 +1486,14 @@ async def cmd_stats(msg: Message):
     for c in cards:
         rarities[c["rarity"]] = rarities.get(c["rarity"], 0) + 1
 
-    boost = get_total_luck_boost(db, msg.from_user.id)
+    boost = get_total_luck_boost(db, msg.from_user.id, msg.chat.id)
     pity = db.get_pity_counters(msg.from_user.id)
 
     txt = f"📊 <b>СТАТИСТИКА</b>\n\n🃏 Карт: <b>{len(cards)}</b>\n"
     if boost > 1:
-        casino_chance = get_casino_win_chance(boost)
+        casino_chance = get_casino_win_chance(boost, "x2")
         txt += f"🍀 <b>Удача: x{boost}</b>\n"
-        txt += f"🎰 Шанс в казино: <b>{int(casino_chance * 100)}%</b>\n"
+        txt += f"🎰 Шанс казино (x2): <b>{int(casino_chance * 100)}%</b>\n"
     txt += "\n"
 
     for r in ["mega", "mega_fused", "limited", "fused", "special", "mythic", "legendary", "epic", "rare", "common"]:
