@@ -956,7 +956,6 @@ async def casino_cb(cb: CallbackQuery):
                 InlineKeyboardButton(text="500", callback_data=f"casbet:{action}:500"),
                 InlineKeyboardButton(text="1000", callback_data=f"casbet:{action}:1000"),
             ],
-            [InlineKeyboardButton(text="🎲 ALL-IN", callback_data=f"casbet:{action}:allin")],
             [InlineKeyboardButton(text="◀️ Назад", callback_data="cas:menu")],
         ])
 
