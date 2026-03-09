@@ -1,1 +1,1 @@
-from . import admin, cards, battle, market, pay, trade
+from . import admin, cards, battle, market, trade, pay, upgrade

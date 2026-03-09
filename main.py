@@ -10,7 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
-from handlers import admin, cards, battle, market, trade, pay
+from handlers import admin, cards, battle, market, trade, pay, upgrade
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ dp.include_router(battle.router)
 dp.include_router(market.router)
 dp.include_router(trade.router)
 dp.include_router(pay.router)
-
+dp.include_router(upgrade.router)
 
 # ================= KEEP-ALIVE WEB SERVER =================
 
@@ -95,11 +95,11 @@ async def start_help_command(message: Message):
         "├ /spin — прокрутка карты (КД 30 мин)\n"
         "└ /multispin — мультиспин (КД 1 час)\n\n"
 
-        "<b>🃏 КАРТЫ</b>\n"
-        "├ /mycards — мои карты\n"
-        "├ /card [имя] — инфо о карте\n"
-        "└ /collection — статистика коллекции\n\n"
-
+         "<b>🃏 КАРТЫ</b>\n"
+"├ /mycards — мои карты\n"
+"├ /card [имя] — инфо о карте\n"
+"├ /upgrade — улучшить карты 🔮\n"
+"└ /collection — статистика коллекции\n\n" 
         "<b>💰 ЭКОНОМИКА</b>\n"
         "├ /balance — мой баланс\n"
         "├ /market — магазин\n"
@@ -159,6 +159,7 @@ async def set_commands():
         BotCommand(command="rules", description="📜 Правила чата"),
         BotCommand(command="ranks", description="🎖️ Администрация"),
         BotCommand(command="myrank", description="📊 Мой ранг"),
+BotCommand(command="upgrade", description="🔮 Улучшить карты"),
     ]
     await bot.set_my_commands(commands)
     logger.info("✅ Команды установлены")
