@@ -28,14 +28,73 @@ EMOJI = {
 }
 
 RANKS = {
-    0: {"name": "Участник", "emoji": "👤", "color": "⚪", "permissions": [], "description": "Обычный участник чата"},
-    1: {"name": "Мл.Модератор", "emoji": "🔰", "color": "🟢", "permissions": ["mute", "warn", "delete_messages", "view_warns"], "description": "Младший модератор"},
-    2: {"name": "Ст.Модератор", "emoji": "🛡️", "color": "🔵", "permissions": ["mute", "unmute", "warn", "unwarn", "delete_messages", "view_warns", "pin_messages", "slow_mode"], "description": "Старший модератор"},
-    3: {"name": "Мл.Админ", "emoji": "⚔️", "color": "🟣", "permissions": ["mute", "unmute", "warn", "unwarn", "ban", "kick", "delete_messages", "view_warns", "pin_messages", "slow_mode", "set_rules", "invite_users"], "description": "Младший администратор"},
-    4: {"name": "Гл.Админ", "emoji": "🔱", "color": "🟡", "permissions": ["mute", "unmute", "warn", "unwarn", "ban", "unban", "kick", "delete_messages", "view_warns", "pin_messages", "slow_mode", "set_rules", "invite_users", "promote_1", "promote_2", "change_info", "manage_voice"], "description": "Главный администратор"},
-    5: {"name": "Со-Владелец", "emoji": "👑", "color": "🟠", "permissions": ["mute", "unmute", "warn", "unwarn", "ban", "unban", "kick", "delete_messages", "view_warns", "pin_messages", "slow_mode", "set_rules", "invite_users", "promote_1", "promote_2", "promote_3", "promote_4", "demote", "change_info", "manage_voice", "add_admins", "manage_chat"], "description": "Со-владелец"},
-    6: {"name": "Владелец", "emoji": "🏆", "color": "🔴", "permissions": ["all"], "description": "Владелец чата"},
-    99: {"name": "Создатель бота", "emoji": "💠", "color": "🔷", "permissions": ["all"], "description": "Создатель бота"},
+    0: {
+        "name": "Участник",
+        "emoji": "👤",
+        "color": "⚪",
+        "permissions": [],
+        "description": "Обычный участник чата"
+    },
+    1: {
+        "name": "Мл.Модератор",
+        "emoji": "🔰",
+        "color": "🟢",
+        "permissions": ["mute", "warn", "delete_messages", "view_warns"],
+        "description": "Младший модератор"
+    },
+    2: {
+        "name": "Ст.Модератор",
+        "emoji": "🛡️",
+        "color": "🔵",
+        "permissions": ["mute", "unmute", "warn", "unwarn", "delete_messages", "view_warns", "pin_messages", "slow_mode"],
+        "description": "Старший модератор"
+    },
+    3: {
+        "name": "Мл.Админ",
+        "emoji": "⚔️",
+        "color": "🟣",
+        "permissions": ["mute", "unmute", "warn", "unwarn", "ban", "kick", "delete_messages", "view_warns", "pin_messages", "slow_mode", "set_rules", "invite_users"],
+        "description": "Младший администратор"
+    },
+    4: {
+        "name": "Гл.Админ",
+        "emoji": "🔱",
+        "color": "🟡",
+        "permissions": [
+            "mute", "unmute", "warn", "unwarn", "ban", "unban", "kick",
+            "delete_messages", "view_warns", "pin_messages", "slow_mode",
+            "set_rules", "invite_users", "promote_1", "promote_2", "promote_3",
+            "demote",  # <-- ДОБАВЛЕНО
+            "change_info", "manage_voice"
+        ],
+        "description": "Главный администратор"
+    },
+    5: {
+        "name": "Со-Владелец",
+        "emoji": "👑",
+        "color": "🟠",
+        "permissions": [
+            "mute", "unmute", "warn", "unwarn", "ban", "unban", "kick",
+            "delete_messages", "view_warns", "pin_messages", "slow_mode",
+            "set_rules", "invite_users", "promote_1", "promote_2", "promote_3", "promote_4",
+            "demote", "change_info", "manage_voice", "add_admins", "manage_chat"
+        ],
+        "description": "Со-владелец"
+    },
+    6: {
+        "name": "Владелец",
+        "emoji": "🏆",
+        "color": "🔴",
+        "permissions": ["all"],
+        "description": "Владелец чата"
+    },
+    99: {
+        "name": "Создатель бота",
+        "emoji": "💠",
+        "color": "🔷",
+        "permissions": ["all"],
+        "description": "Создатель бота"
+    },
 }
 
 PERMISSION_DESCRIPTIONS = {

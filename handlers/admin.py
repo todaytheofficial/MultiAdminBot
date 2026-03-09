@@ -391,14 +391,16 @@ async def promote_user(message: Message, bot: Bot):
 
 
 @router.message(Command("demote"))
+@router.message(Command("demote"))
 async def demote_user(message: Message, bot: Bot):
     if not is_group_chat(message):
         return await message.reply(f"{EMOJI['cross']} Только в группах!")
 
     perms = await get_user_permissions(message, bot)
 
+    # Проверяем право demote ИЛИ уровень 4+
     if not has_permission(perms, "demote") and not has_permission(perms, "all"):
-        return await message.reply(f"{EMOJI['cross']} Нужен ранг {RANKS[5]['emoji']} {RANKS[5]['name']} или выше!")
+        return await message.reply(f"{EMOJI['cross']} Нужен ранг {RANKS[4]['emoji']} {RANKS[4]['name']} или выше!")
 
     target_id, first_name, username, remaining_args, error = await get_target_user(message, bot)
 
@@ -406,7 +408,7 @@ async def demote_user(message: Message, bot: Bot):
         return await message.reply(
             f"{EMOJI['demote']} <b>Понижение</b>\n\n"
             f"<code>/demote @user</code> — на 1 ранг\n"
-            f"<code>/demote @user 0</code> — снять все",
+            f"<code>/demote @user 0</code> — снять ранг",
             parse_mode="HTML"
         )
 
@@ -416,21 +418,40 @@ async def demote_user(message: Message, bot: Bot):
     db = get_db(message)
     target_rank = db.get_user_rank(target_id)
 
+    # Нельзя понизить равного или старшего
     if target_rank["rank_level"] >= perms["level"] and perms["level"] < 99:
-        return await message.reply(f"{EMOJI['cross']} Нельзя понизить равного или старшего!")
+        return await message.reply(
+            f"{EMOJI['cross']} Нельзя понизить "
+            f"{RANKS.get(target_rank['rank_level'], RANKS[0])['emoji']} "
+            f"{RANKS.get(target_rank['rank_level'], RANKS[0])['name']}!"
+        )
 
+    # Если цель — участник (0), нечего понижать
+    if target_rank["rank_level"] == 0:
+        return await message.reply(f"{EMOJI['cross']} Это обычный участник, понижать некуда!")
+
+    # Определяем новый ранг
     new_rank = max(0, target_rank["rank_level"] - 1)
+    
+    # Если указан конкретный ранг
     if remaining_args:
         try:
-            new_rank = max(0, int(remaining_args.split()[0]))
+            requested_rank = int(remaining_args.split()[0])
+            # Можно понизить только до ранга ниже своего
+            if requested_rank >= perms["level"] and perms["level"] < 99:
+                return await message.reply(f"{EMOJI['cross']} Нельзя понизить до своего ранга или выше!")
+            # Нельзя понизить выше текущего ранга цели
+            new_rank = max(0, min(target_rank["rank_level"] - 1, requested_rank))
         except ValueError:
             pass
 
     db.set_user_rank(target_id, new_rank, "", message.from_user.id)
 
-    rank_info = RANKS[new_rank]
+    rank_info = RANKS.get(new_rank, RANKS[0])
     old_rank_info = RANKS.get(target_rank["rank_level"], RANKS[0])
 
+    # Снимаем права в Telegram
+    tg_status = ""
     try:
         if new_rank == 0:
             await bot.promote_chat_member(
@@ -444,14 +465,29 @@ async def demote_user(message: Message, bot: Bot):
                 can_promote_members=False,
                 can_change_info=False
             )
-    except Exception:
-        pass
+            tg_status = "\n\n✅ <i>Права Telegram сняты</i>"
+        else:
+            # Обновляем права согласно новому рангу
+            await bot.promote_chat_member(
+                chat_id=message.chat.id,
+                user_id=target_id,
+                can_delete_messages=new_rank >= 1,
+                can_restrict_members=new_rank >= 1,
+                can_pin_messages=new_rank >= 2,
+                can_invite_users=new_rank >= 2,
+                can_manage_video_chats=new_rank >= 3,
+                can_promote_members=False,
+                can_change_info=new_rank >= 4
+            )
+            tg_status = "\n\n✅ <i>Права Telegram обновлены</i>"
+    except Exception as e:
+        tg_status = f"\n\n⚠️ <i>Права Telegram не изменены</i>"
 
     await message.reply(
         f"{EMOJI['demote']} <b>ПОНИЖЕНИЕ</b>\n\n"
         f"👤 {mention_user(target_id, first_name, username)}\n"
         f"📊 {old_rank_info['emoji']} → {rank_info['emoji']} <b>{rank_info['name']}</b>\n\n"
-        f"👮 {message.from_user.mention_html()}",
+        f"👮 {message.from_user.mention_html()}{tg_status}",
         parse_mode="HTML"
     )
 
