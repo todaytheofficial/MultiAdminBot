@@ -1,12 +1,11 @@
 # handlers/battle.py
 import random
 import asyncio
-from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
-from config import EMOJI, CARDS, RARITY_COLORS, RARITY_NAMES, ARENA_SETTINGS
+from config import EMOJI, RARITY_COLORS, RARITY_NAMES, ARENA_SETTINGS
 from database import DatabaseManager
 
 router = Router()
@@ -178,15 +177,6 @@ def get_best_cards(cards: list, count: int = 3) -> list:
     return sorted_cards[:count]
 
 
-def _try_update_quest(db, user_id, quest_type, amount=1, extra_data=None):
-    """Безопасное обновление квестов"""
-    try:
-        from handlers.quests import update_quest_progress
-        update_quest_progress(db, user_id, quest_type, amount, extra_data)
-    except Exception:
-        pass
-
-
 # ================== КОМАНДЫ АРЕНЫ ==================
 
 @router.message(Command("arena"))
@@ -271,8 +261,7 @@ async def arena_command(message: Message):
         f"👥 В очереди: <b>{queue_count}</b>\n\n"
         f"<b>Твоя колода:</b>\n{cards_text}"
         f"💪 Общая сила: <b>{total_power}</b>\n\n"
-        f"⏳ Ожидание противника...\n\n"
-        f"<i>🍀 В бою есть элемент удачи — криты и уклонения!</i>",
+        f"⏳ Ожидание противника...",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -324,12 +313,8 @@ async def set_deck_command(message: Message):
             )
         ])
 
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="🔝 Авто-выбор лучших", callback_data="deck_auto")
-    ])
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="✅ Готово", callback_data="deck_done")
-    ])
+    keyboard_buttons.append([InlineKeyboardButton(text="🔝 Авто-выбор лучших", callback_data="deck_auto")])
+    keyboard_buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="deck_done")])
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
@@ -344,8 +329,7 @@ async def set_deck_command(message: Message):
 
     await message.reply(
         f"🃏 <b>ВЫБОР КОЛОДЫ ДЛЯ АРЕНЫ</b>\n\n"
-        f"Выбери <b>{cards_needed}</b> карты для боёв:{current_text}\n"
-        f"<i>Нажми на карту чтобы добавить/убрать</i>",
+        f"Выбери <b>{cards_needed}</b> карты для боёв:{current_text}",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -371,19 +355,18 @@ async def toggle_deck_card(callback: CallbackQuery):
 
     if card_name in current_deck:
         current_deck.remove(card_name)
-        await callback.answer(f"❌ {card_name} убрана из колоды")
+        await callback.answer(f"❌ {card_name} убрана")
     else:
         if len(current_deck) >= cards_needed:
-            return await callback.answer(f"Колода полная! Сначала убери карту.", show_alert=True)
+            return await callback.answer(f"Колода полная!", show_alert=True)
         current_deck.append(card_name)
-        await callback.answer(f"✅ {card_name} добавлена в колоду")
+        await callback.answer(f"✅ {card_name} добавлена")
 
     db.set_arena_cards(user_id, current_deck)
     await _refresh_deck_message(callback, user_id, db)
 
 
 async def _refresh_deck_message(callback: CallbackQuery, user_id: int, db):
-    """Обновить сообщение выбора колоды"""
     user = db.get_user(user_id)
     cards = user.get("cards", [])
     current_deck = db.get_arena_cards(user_id)
@@ -410,12 +393,8 @@ async def _refresh_deck_message(callback: CallbackQuery, user_id: int, db):
             )
         ])
 
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="🔝 Авто-выбор лучших", callback_data="deck_auto")
-    ])
-    keyboard_buttons.append([
-        InlineKeyboardButton(text="✅ Готово", callback_data="deck_done")
-    ])
+    keyboard_buttons.append([InlineKeyboardButton(text="🔝 Авто-выбор лучших", callback_data="deck_auto")])
+    keyboard_buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="deck_done")])
     keyboard = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
     current_text = ""
@@ -430,12 +409,11 @@ async def _refresh_deck_message(callback: CallbackQuery, user_id: int, db):
     try:
         await callback.message.edit_text(
             f"🃏 <b>ВЫБОР КОЛОДЫ ДЛЯ АРЕНЫ</b>\n\n"
-            f"Выбери <b>{cards_needed}</b> карты для боёв:{current_text}\n"
-            f"<i>Нажми на карту чтобы добавить/убрать</i>",
+            f"Выбери <b>{cards_needed}</b> карты для боёв:{current_text}",
             parse_mode="HTML",
             reply_markup=keyboard
         )
-    except:
+    except Exception:
         pass
 
 
@@ -455,7 +433,7 @@ async def auto_select_deck(callback: CallbackQuery):
     arena_cards = [c["name"] for c in best_cards]
     db.set_arena_cards(user_id, arena_cards)
 
-    await callback.answer(f"✅ Выбраны {cards_needed} лучших карты!")
+    await callback.answer(f"✅ Выбраны {cards_needed} лучших!")
     await _refresh_deck_message(callback, user_id, db)
 
 
@@ -468,10 +446,7 @@ async def deck_done(callback: CallbackQuery):
     cards_needed = ARENA_SETTINGS.get("cards_per_battle", 3)
 
     if len(current_deck) < cards_needed:
-        return await callback.answer(
-            f"Выбери ещё {cards_needed - len(current_deck)} карт!",
-            show_alert=True
-        )
+        return await callback.answer(f"Выбери ещё {cards_needed - len(current_deck)} карт!", show_alert=True)
 
     user = db.get_user(user_id)
     cards = user.get("cards", [])
@@ -514,10 +489,7 @@ async def show_my_deck(message: Message):
 
     if not arena_cards:
         return await message.reply(
-            f"🃏 <b>ТВОЯ КОЛОДА</b>\n\n"
-            f"Колода не выбрана!\n\n"
-            f"💡 /setdeck — выбрать карты\n"
-            f"💡 /arena — автовыбор лучших",
+            f"🃏 <b>ТВОЯ КОЛОДА</b>\n\nКолода не выбрана!\n\n💡 /setdeck — выбрать карты",
             parse_mode="HTML"
         )
 
@@ -535,8 +507,7 @@ async def show_my_deck(message: Message):
         f"🃏 <b>ТВОЯ КОЛОДА ({len(arena_cards)}/{cards_needed})</b>\n\n"
         f"{cards_text}"
         f"💪 Общая сила: <b>{total_power}</b>\n\n"
-        f"⚔️ /arena — на арену!\n"
-        f"🔄 /setdeck — изменить",
+        f"⚔️ /arena — на арену!\n🔄 /setdeck — изменить",
         parse_mode="HTML"
     )
 
@@ -552,8 +523,7 @@ async def leave_arena_queue(callback: CallbackQuery):
     db.leave_arena_queue(user_id)
 
     await callback.message.edit_text(
-        f"❌ <b>Ты покинул очередь</b>\n\n"
-        f"⚔️ /arena — вернуться на арену",
+        f"❌ <b>Ты покинул очередь</b>\n\n⚔️ /arena — вернуться",
         parse_mode="HTML"
     )
     await callback.answer("Очередь покинута")
@@ -569,142 +539,9 @@ async def change_deck_from_queue(callback: CallbackQuery):
     await _refresh_deck_message(callback, user_id, db)
 
 
-@router.message(Command("rating"))
-async def show_rating(message: Message):
-    if not is_group_chat(message):
-        return await message.reply(f"{EMOJI['cross']} Только в группах!")
-
-    db = get_db(message)
-    top_players = db.get_top_players(10)
-
-    if not top_players:
-        return await message.reply(
-            f"⚔️ <b>РЕЙТИНГ АРЕНЫ</b>\n\nПока никто не сражался!\n\n💡 /arena — начать бой",
-            parse_mode="HTML"
-        )
-
-    text = f"⚔️ <b>РЕЙТИНГ АРЕНЫ</b>\n\n"
-    medals = ["🥇", "🥈", "🥉"]
-
-    for i, player in enumerate(top_players):
-        medal = medals[i] if i < 3 else f"{i+1}."
-        name = get_user_name(player)
-        rating = player.get("rating", 0)
-        wins = player.get("wins", 0)
-        losses = player.get("losses", 0)
-        winrate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
-        text += f"{medal} <b>{name}</b>\n"
-        text += f"    ⭐ {rating} | ✅ {wins}W / ❌ {losses}L ({winrate:.0f}%)\n"
-
-    await message.reply(text, parse_mode="HTML")
-
-
-@router.message(Command("profile"))
-async def show_profile(message: Message):
-    if not is_group_chat(message):
-        return await message.reply(f"{EMOJI['cross']} Только в группах!")
-
-    db = get_db(message)
-
-    target_id = message.from_user.id
-    target_name = message.from_user.first_name
-
-    if message.reply_to_message:
-        target_id = message.reply_to_message.from_user.id
-        target_name = message.reply_to_message.from_user.first_name
-    else:
-        args = message.text.split()
-        if len(args) > 1 and args[1].startswith("@"):
-            global_db = DatabaseManager.get_global_db()
-            user_data = global_db.find_by_username(args[1][1:])
-            if user_data:
-                target_id = user_data["user_id"]
-                target_name = user_data.get("first_name", args[1])
-
-    user = db.get_user(target_id)
-    if not user:
-        return await message.reply(f"{EMOJI['cross']} Профиль не найден!")
-
-    cards = user.get("cards", [])
-    coins = user.get("coins", 0)
-    rating = user.get("rating", 0)
-    wins = user.get("wins", 0)
-    losses = user.get("losses", 0)
-    bio = user.get("bio", "")
-    shields = user.get("shields", 0)
-    winrate = (wins / (wins + losses) * 100) if (wins + losses) > 0 else 0
-
-    rarity_counts = {}
-    for card in cards:
-        rarity = card["rarity"]
-        rarity_counts[rarity] = rarity_counts.get(rarity, 0) + 1
-
-    text = f"👤 <b>ПРОФИЛЬ</b>\n\n"
-    text += f"📛 <b>{target_name}</b>\n"
-    if bio:
-        text += f"📝 <i>{bio}</i>\n"
-
-    text += f"\n<b>📊 Статистика:</b>\n"
-    text += f"🪙 Монеты: <b>{coins}</b>\n"
-    text += f"🛡️ Щиты: <b>{shields}</b>\n"
-    text += f"🃏 Карт: <b>{len(cards)}</b>\n"
-
-    if rarity_counts:
-        text += f"\n<b>Карты по редкости:</b>\n"
-        for rarity in ["mega", "limited", "special", "mythic", "legendary", "epic", "rare", "common"]:
-            if rarity in rarity_counts:
-                color = RARITY_COLORS.get(rarity, "⚪")
-                text += f"  {color} {RARITY_NAMES.get(rarity, rarity)}: {rarity_counts[rarity]}\n"
-
-    text += f"\n<b>⚔️ Арена:</b>\n"
-    text += f"⭐ Рейтинг: <b>{rating}</b>\n"
-    text += f"✅ Побед: <b>{wins}</b>\n"
-    text += f"❌ Поражений: <b>{losses}</b>\n"
-    text += f"📈 Винрейт: <b>{winrate:.1f}%</b>\n"
-
-    if cards:
-        best = max(cards, key=lambda x: x["attack"] + x["defense"])
-        power = best["attack"] + best["defense"]
-        rarity_color = RARITY_COLORS.get(best["rarity"], "⚪")
-        text += f"\n👑 <b>Лучшая карта:</b>\n"
-        text += f"  {rarity_color} {best['emoji']} {best['name']} (💪{power})"
-
-    await message.reply(text, parse_mode="HTML")
-
-
-@router.message(Command("setbio"))
-async def set_bio(message: Message):
-    if not is_group_chat(message):
-        return await message.reply(f"{EMOJI['cross']} Только в группах!")
-
-    args = message.text.split(maxsplit=1)
-    if len(args) < 2:
-        return await message.reply(
-            f"✏️ <b>Установка био</b>\n\n"
-            f"<code>/setbio [текст]</code>\n\n"
-            f"Пример: <code>/setbio Люблю коллекционировать карты!</code>",
-            parse_mode="HTML"
-        )
-
-    bio = args[1][:200]
-    db = get_db(message)
-    user_id = message.from_user.id
-
-    if not db.get_user(user_id):
-        db.create_user(user_id, message.from_user.username, message.from_user.first_name)
-
-    db.set_bio(user_id, bio)
-
-    await message.reply(
-        f"✅ <b>Био установлено!</b>\n\n📝 <i>{bio}</i>",
-        parse_mode="HTML"
-    )
-
-
 # ================== ПРОВЕРКА ОЧЕРЕДИ ==================
 
 async def check_queue_periodically(bot: Bot):
-    """Периодическая проверка очереди и запуск боёв"""
     while True:
         try:
             for group_db in DatabaseManager.get_all_group_dbs():
@@ -715,7 +552,6 @@ async def check_queue_periodically(bot: Bot):
 
 
 async def process_arena_queue(bot: Bot, db):
-    """Обработать очередь арены для одной группы"""
     async with queue_lock:
         queue = db.get_arena_queue()
 
@@ -786,20 +622,6 @@ async def process_arena_queue(bot: Bot, db):
         db.update_rating(loser_id, -rating_lose, False)
         db.add_coins(winner_id, coins_win)
         db.add_coins(loser_id, coins_lose)
-
-        # Обновляем квесты для обоих
-        _try_update_quest(db, player1_id, "arena_battle", 1)
-        _try_update_quest(db, player2_id, "arena_battle", 1)
-        _try_update_quest(db, winner_id, "arena_win", 1)
-        _try_update_quest(db, winner_id, "earn_coins", coins_win)
-        _try_update_quest(db, loser_id, "earn_coins", coins_lose)
-
-        # Сохраняем бой в истории (если метод есть)
-        try:
-            battle_log_text = format_battle_log(battle_result, player1_name, player2_name)
-            db.add_battle(player1_id, player2_id, winner_id, player1_card_names, player2_card_names, battle_log_text)
-        except Exception:
-            pass
 
         text = f"⚔️ <b>БОЙ ЗАВЕРШЁН!</b>\n\n"
         text += f"👤 <b>{player1_name}</b> VS <b>{player2_name}</b> 👤\n"

@@ -1,5 +1,5 @@
 import os
-BOT_TOKEN = "8285867368:AAGZkS-hMQ-22WHCQkDzh8t0JF5aqssg5-g"
+BOT_TOKEN = "8554883360:AAHgqNde6T6iaW26vINy7DmYg2N4BWgvIjs"
 
 # Создатели бота - по ID (не username!)
 BOT_CREATOR_IDS = [
