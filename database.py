@@ -193,6 +193,57 @@ class GroupDatabase:
                 return True
         return False
 
+    def remove_cards_by_rarity(self, user_id: int, rarity: str, count: int) -> bool:
+        """Удаляет N карт определённой редкости у пользователя. Возвращает True если хватило карт."""
+        user = self.get_user(user_id)
+        if not user:
+            return False
+        
+        cards = user.get("cards", [])
+        
+        # Считаем сколько карт нужной редкости
+        rarity_count = sum(1 for c in cards if c.get("rarity") == rarity)
+        if rarity_count < count:
+            return False
+        
+        # Удаляем N карт этой редкости (сначала дубликаты — одинаковые имена)
+        # Считаем количество каждой карты
+        name_counts = {}
+        for c in cards:
+            if c.get("rarity") == rarity:
+                name_counts[c["name"]] = name_counts.get(c["name"], 0) + 1
+        
+        # Сортируем: сначала удаляем те, которых больше всего (дупы)
+        sorted_names = sorted(name_counts.items(), key=lambda x: -x[1])
+        
+        to_remove = count
+        remove_plan = {}  # name -> сколько удалить
+        
+        for name, cnt in sorted_names:
+            if to_remove <= 0:
+                break
+            can_remove = min(cnt, to_remove)
+            remove_plan[name] = can_remove
+            to_remove -= can_remove
+        
+        # Применяем удаление
+        new_cards = []
+        removed_counts = {}
+        for c in cards:
+            name = c["name"]
+            if c.get("rarity") == rarity and name in remove_plan:
+                already_removed = removed_counts.get(name, 0)
+                if already_removed < remove_plan[name]:
+                    removed_counts[name] = already_removed + 1
+                    continue  # пропускаем (удаляем)
+            new_cards.append(c)
+        
+        self._col("users").update_one(
+            {"user_id": user_id},
+            {"$set": {"cards": new_cards}}
+        )
+        return True
+
     def clear_user_cards(self, user_id: int):
         self._col("users").update_one({"user_id": user_id}, {"$set": {"cards": []}})
 
@@ -439,59 +490,6 @@ class GroupDatabase:
                 "first_name": user.get("first_name") if user else None
             })
         return result
-
-# database.py — добавь этот метод в класс GroupDatabase, после метода remove_card_from_user
-
-def remove_cards_by_rarity(self, user_id: int, rarity: str, count: int) -> bool:
-    """Удаляет N карт определённой редкости у пользователя. Возвращает True если хватило карт."""
-    user = self.get_user(user_id)
-    if not user:
-        return False
-    
-    cards = user.get("cards", [])
-    
-    # Считаем сколько карт нужной редкости
-    rarity_count = sum(1 for c in cards if c.get("rarity") == rarity)
-    if rarity_count < count:
-        return False
-    
-    # Удаляем N карт этой редкости (сначала дубликаты — одинаковые имена)
-    # Считаем количество каждой карты
-    name_counts = {}
-    for c in cards:
-        if c.get("rarity") == rarity:
-            name_counts[c["name"]] = name_counts.get(c["name"], 0) + 1
-    
-    # Сортируем: сначала удаляем те, которых больше всего (дупы)
-    sorted_names = sorted(name_counts.items(), key=lambda x: -x[1])
-    
-    to_remove = count
-    remove_plan = {}  # name -> сколько удалить
-    
-    for name, cnt in sorted_names:
-        if to_remove <= 0:
-            break
-        can_remove = min(cnt, to_remove)
-        remove_plan[name] = can_remove
-        to_remove -= can_remove
-    
-    # Применяем удаление
-    new_cards = []
-    removed_counts = {}
-    for c in cards:
-        name = c["name"]
-        if c.get("rarity") == rarity and name in remove_plan:
-            already_removed = removed_counts.get(name, 0)
-            if already_removed < remove_plan[name]:
-                removed_counts[name] = already_removed + 1
-                continue  # пропускаем (удаляем)
-        new_cards.append(c)
-    
-    self._col("users").update_one(
-        {"user_id": user_id},
-        {"$set": {"cards": new_cards}}
-    )
-    return True
 
     # ══════════════════════════════════════════════════
     #                      RESET
